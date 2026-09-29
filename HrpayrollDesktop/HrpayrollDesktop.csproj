@@ -1,0 +1,55 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+	  <LangVersion>latest</LangVersion>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>HrpayrollDesktop</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="SecuGen.FDxSDKPro.Windows">
+      <HintPath>C:\Users\Tuinuane_CEO\Desktop\FDx_SDK_Pro_Windows_v4.3.1_J1.21\FDx SDK Pro for Windows v4.3.1\DotNETFramework\Bin\x64\SecuGen.FDxSDKPro.Windows.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="C:\Users\Tuinuane_CEO\Desktop\FDx_SDK_Pro_Windows_v4.3.1_J1.21\FDx SDK Pro for Windows v4.3.1\bin\x64\sgfplib.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="C:\Users\Tuinuane_CEO\Desktop\FDx_SDK_Pro_Windows_v4.3.1_J1.21\FDx SDK Pro for Windows v4.3.1\bin\x64\sgfdusdax64.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="C:\Users\Tuinuane_CEO\Desktop\FDx_SDK_Pro_Windows_v4.3.1_J1.21\FDx SDK Pro for Windows v4.3.1\bin\x64\sgfpamx.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="C:\Users\Tuinuane_CEO\Desktop\FDx_SDK_Pro_Windows_v4.3.1_J1.21\FDx SDK Pro for Windows v4.3.1\bin\x64\sgwsqlib.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="C:\Users\Tuinuane_CEO\Desktop\FDx_SDK_Pro_Windows_v4.3.1_J1.21\FDx SDK Pro for Windows v4.3.1\bin\x64\sgbledev.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Styles\" />
+  </ItemGroup>
+
+</Project>

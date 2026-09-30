@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using HrpayrollDesktop.Config;
+using HrpayrollDesktop.Local;
 using HrpayrollDesktop.OfflineQueue;
 using HrpayrollDesktop.Sync;
 using HrpayrollDesktop.Terminal;
@@ -15,41 +16,61 @@ public class AttendanceEngine : BackgroundService
 {
     private const int QueueDepthWarningThreshold = 200;
 
+    // Same person scanning again within this window is ignored silently
+    // (finger still resting on the glass while the success screen shows).
+    private static readonly TimeSpan SilentRepeatWindow = TimeSpan.FromSeconds(6);
+
+    // Within this window a repeat scan shows "already recorded" instead of
+    // flipping clock-in to clock-out by accident.
+    private static readonly TimeSpan ScanCooldown = TimeSpan.FromSeconds(60);
+
     private readonly ILogger<AttendanceEngine> _logger;
     private readonly ITerminalAdapter _terminalAdapter;
     private readonly OfflineQueueStore _queueStore;
+    private readonly LocalAttendanceStore _localStore;
     private readonly BackendApiClient _apiClient;
     private readonly AgentSettings _settings;
 
-    public event Action<string, string, DateTime>? MatchOccurred; // terminalUserId, eventType, timestamp
-    public event Action<string>? DeviceFault; // message
+    public event Action<string, string, DateTime>? MatchOccurred;    // terminalUserId, eventType, timestampUtc
+    public event Action<string, string, DateTime>? DuplicateScan;    // terminalUserId, lastEventType, lastTimestampUtc
+    public event Action? FingerCaptured;
+    public event Action? FingerNotRecognized;
+    public event Action<string>? DeviceFault;
     public event Action? DeviceReady;
 
     public bool DeviceConnected { get; private set; }
+
+    public int PendingSyncCount => _queueStore.GetPendingCount();
 
     public AttendanceEngine(
         ILogger<AttendanceEngine> logger,
         ITerminalAdapter terminalAdapter,
         OfflineQueueStore queueStore,
+        LocalAttendanceStore localStore,
         BackendApiClient apiClient,
         IOptions<AgentSettings> settings)
     {
         _logger = logger;
         _terminalAdapter = terminalAdapter;
         _queueStore = queueStore;
+        _localStore = localStore;
         _apiClient = apiClient;
         _settings = settings.Value;
+
+        _terminalAdapter.FingerCaptured += () => FingerCaptured?.Invoke();
+        _terminalAdapter.FingerNotRecognized += () => FingerNotRecognized?.Invoke();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _queueStore.Initialize();
+        _localStore.Initialize();
 
         try
         {
             await _terminalAdapter.ConnectAsync(stoppingToken);
             DeviceConnected = true;
-            DeviceReady?.Invoke();   
+            DeviceReady?.Invoke();
         }
         catch (Exception ex)
         {
@@ -116,9 +137,24 @@ public class AttendanceEngine : BackgroundService
 
         foreach (var evt in events)
         {
-            var lastEventType = _queueStore.GetLastEventType(evt.TerminalUserId);
-            var eventType = lastEventType == "CLOCK_IN" ? "CLOCK_OUT" : "CLOCK_IN";
-            _queueStore.SetLastEventType(evt.TerminalUserId, eventType);
+            var last = _localStore.GetLastEventToday(evt.TerminalUserId);
+
+            if (last is not null)
+            {
+                var since = evt.Timestamp - last.TimestampUtc;
+
+                if (since < SilentRepeatWindow)
+                    continue;
+
+                if (since < ScanCooldown)
+                {
+                    DuplicateScan?.Invoke(evt.TerminalUserId, last.EventType, last.TimestampUtc);
+                    continue;
+                }
+            }
+
+            // Toggle is per calendar day: no scan yet today => always CLOCK_IN.
+            var eventType = last?.EventType == "CLOCK_IN" ? "CLOCK_OUT" : "CLOCK_IN";
 
             _queueStore.Enqueue(new QueuedEvent
             {
@@ -128,6 +164,8 @@ public class AttendanceEngine : BackgroundService
                 VerifyMethod = evt.VerifyMethod,
                 EventType = eventType,
             });
+
+            _localStore.AppendLog(evt.EventId, evt.TerminalUserId, eventType, evt.Timestamp);
 
             _logger.LogInformation("Queued event {EventId} ({EventType})", evt.EventId, eventType);
 

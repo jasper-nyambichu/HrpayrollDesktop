@@ -1,0 +1,567 @@
+﻿<UserControl x:Class="HrpayrollDesktop.ConsoleView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             TextElement.FontFamily="{StaticResource AppFont}"
+             Background="{StaticResource SurfaceBrush}">
+    <UserControl.Resources>
+        <FontFamily x:Key="IconFont">Segoe MDL2 Assets</FontFamily>
+
+        <!-- One row template shared by the Dashboard and Attendance lists -->
+        <DataTemplate x:Key="AttendanceRowTemplate">
+            <Border BorderBrush="{StaticResource BorderLightBrush}" BorderThickness="0,0,0,1" Padding="0,10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding EmployeeName}" Foreground="{StaticResource HeadingBrush}" FontSize="12"
+                               FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="{Binding Summary}" Foreground="{StaticResource MutedBrush}"
+                               FontSize="11" Margin="0,0,14,0" VerticalAlignment="Center"/>
+                    <Border Grid.Column="2" CornerRadius="999" Padding="9,2" Background="{Binding StatusBackground}"
+                            VerticalAlignment="Center" MinWidth="64">
+                        <TextBlock Text="{Binding Status}" Foreground="{Binding StatusForeground}" FontSize="10"
+                                   FontWeight="Bold" HorizontalAlignment="Center"/>
+                    </Border>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid>
+        <!-- Layer 1: app layout -->
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="36"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Thin title strip -->
+            <Border Grid.Row="0" Background="#0B172A" BorderBrush="#1E293B" BorderThickness="0,0,0,1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
+                        <Border Width="16" Height="16" Background="{StaticResource BlueBrush}" CornerRadius="3">
+                            <TextBlock Text="D" Foreground="White" FontSize="10" FontWeight="Bold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock x:Name="TitleBarText" Text="Dhwarsh HR Desktop — Branch Manager Console"
+                                   Foreground="#CBD5E1" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button Content="&#xE921;" FontFamily="{StaticResource IconFont}" FontSize="11" Width="44" Height="36"
+                                Background="Transparent" Foreground="#94A3B8" BorderThickness="0" ToolTip="Minimize"
+                                Click="MinimizeButton_Click" Style="{StaticResource TitleBarButtonStyle}"/>
+                        <Button Content="&#xE7E8;" FontFamily="{StaticResource IconFont}" FontSize="12" Width="44" Height="36"
+                                Background="Transparent" Foreground="#94A3B8" BorderThickness="0" ToolTip="Exit application"
+                                Click="ExitButton_Click" Style="{StaticResource TitleBarCloseButtonStyle}"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Body -->
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="SidebarColumn" Width="240"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- ===== SIDEBAR ===== -->
+                <Border Grid.Column="0" Background="{StaticResource SidebarBrush}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Height="64" BorderBrush="#1AFFFFFF" BorderThickness="0,0,0,1">
+                            <Grid Margin="16,0">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Border Width="36" Height="36" Background="#1AFFFFFF" CornerRadius="8"
+                                            BorderBrush="#33FFFFFF" BorderThickness="1" Padding="4">
+                                        <Image Source="/Assets/dhwarsh-logo.png" Stretch="Uniform"/>
+                                    </Border>
+                                    <StackPanel x:Name="SidebarTextGroup" Margin="12,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="DHWARSH" Foreground="White" FontSize="13" FontWeight="Black"/>
+                                        <TextBlock Text="Branch Manager" Foreground="#9FC1E8" FontSize="10" FontWeight="Medium"/>
+                                    </StackPanel>
+                                </StackPanel>
+                                <Button Content="&#xE700;" FontFamily="{StaticResource IconFont}" FontSize="18" Width="32"
+                                        Height="32" HorizontalAlignment="Right" Background="Transparent" Foreground="#CBD5E1"
+                                        BorderThickness="0" Click="SidebarToggleButton_Click"
+                                        Style="{StaticResource TitleBarButtonStyle}"/>
+                            </Grid>
+                        </Border>
+
+                        <StackPanel Grid.Row="1" Margin="12">
+                            <ToggleButton x:Name="NavDashboard" Tag="Dashboard" IsChecked="True"
+                                          Style="{StaticResource SidebarNavStyle}" Click="Nav_Click" Margin="0,0,0,4">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE80F;" FontFamily="{StaticResource IconFont}" FontSize="18"/>
+                                    <TextBlock x:Name="NavDashboardLabel" Text="Dashboard" FontSize="13" FontWeight="SemiBold" Margin="14,0,0,0"/>
+                                </StackPanel>
+                            </ToggleButton>
+                            <ToggleButton x:Name="NavEnroll" Tag="Enroll" Style="{StaticResource SidebarNavStyle}"
+                                          Click="Nav_Click" Margin="0,0,0,4">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE90D;" FontFamily="{StaticResource IconFont}" FontSize="18"/>
+                                    <TextBlock x:Name="NavEnrollLabel" Text="Enroll Employee" FontSize="13" FontWeight="SemiBold" Margin="14,0,0,0"/>
+                                </StackPanel>
+                            </ToggleButton>
+                            <ToggleButton x:Name="NavAttendance" Tag="Attendance" Style="{StaticResource SidebarNavStyle}"
+                                          Click="Nav_Click" Margin="0,0,0,4">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE787;" FontFamily="{StaticResource IconFont}" FontSize="18"/>
+                                    <TextBlock x:Name="NavAttendanceLabel" Text="Attendance" FontSize="13" FontWeight="SemiBold" Margin="14,0,0,0"/>
+                                </StackPanel>
+                            </ToggleButton>
+                            <ToggleButton x:Name="NavDevice" Tag="Device" Style="{StaticResource SidebarNavStyle}"
+                                          Click="Nav_Click" Margin="0,0,0,4">
+                                <Grid>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE977;" FontFamily="{StaticResource IconFont}" FontSize="18"/>
+                                        <TextBlock x:Name="NavDeviceLabel" Text="Device" FontSize="13" FontWeight="SemiBold" Margin="14,0,0,0"/>
+                                    </StackPanel>
+                                    <Ellipse x:Name="DeviceNavDot" Width="8" Height="8" Fill="{StaticResource OrangeBrush}"
+                                             HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                </Grid>
+                            </ToggleButton>
+                            <ToggleButton x:Name="NavHelp" Tag="Help" Style="{StaticResource SidebarNavStyle}" Click="Nav_Click">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE897;" FontFamily="{StaticResource IconFont}" FontSize="18"/>
+                                    <TextBlock x:Name="NavHelpLabel" Text="Help" FontSize="13" FontWeight="SemiBold" Margin="14,0,0,0"/>
+                                </StackPanel>
+                            </ToggleButton>
+                        </StackPanel>
+
+                        <Border Grid.Row="2" BorderBrush="#1AFFFFFF" BorderThickness="0,1,0,0" Background="#1A000000" Padding="12">
+                            <Grid>
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="34" Height="34" CornerRadius="17" Background="{StaticResource NavyBrush}"
+                                            BorderBrush="{StaticResource BlueBrush}" BorderThickness="2">
+                                        <TextBlock x:Name="UserInitialText" Text="B" Foreground="White" FontWeight="Bold"
+                                                   FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <StackPanel x:Name="SidebarUserTextGroup" Margin="10,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock x:Name="SidebarUserNameText" Text="Branch Manager" Foreground="White"
+                                                   FontSize="11" FontWeight="Bold"/>
+                                        <TextBlock x:Name="SidebarUserRoleText" Text="Branch Mgr" Foreground="#94A3B8" FontSize="9"/>
+                                    </StackPanel>
+                                </StackPanel>
+                                <Button Content="&#xE72E;" FontFamily="{StaticResource IconFont}" FontSize="16"
+                                        HorizontalAlignment="Right" Width="28" Height="28" Background="Transparent"
+                                        Foreground="#94A3B8" BorderThickness="0" ToolTip="Sign out and return to clock-in screen"
+                                        Click="LockButton_Click" Style="{StaticResource TitleBarButtonStyle}"/>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <!-- ===== MAIN ===== -->
+                <Grid Grid.Column="1">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="80"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Top bar -->
+                    <Border Grid.Row="0" Background="White" BorderBrush="{StaticResource BorderLightBrush}" BorderThickness="0,0,0,1">
+                        <Grid Margin="28,0">
+                            <StackPanel VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="GreetingText" Text="Hello, Branch Manager"
+                                               Foreground="{StaticResource HeadingBrush}" FontSize="19" FontWeight="Black"/>
+                                    <Border Background="#E0EBFA" CornerRadius="999" Padding="9,3" Margin="10,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="Branch Manager" Foreground="{StaticResource BlueBrush}" FontSize="11" FontWeight="Bold"/>
+                                    </Border>
+                                </StackPanel>
+                                <TextBlock x:Name="SessionText" Text="Welcome back." Foreground="{StaticResource MutedBrush}"
+                                           FontSize="11" FontWeight="Medium" Margin="0,3,0,0"/>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <Border x:Name="DeviceStatusPill" Background="#FFF7ED" BorderBrush="#FED7AA" BorderThickness="1"
+                                        CornerRadius="8" Padding="10,6" Margin="0,0,12,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse x:Name="DeviceStatusDot" Width="7" Height="7" Fill="#F5821F" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="DeviceStatusText" Text="Fingerprint reader: connecting..."
+                                                   Foreground="#C2410C" FontSize="11" FontWeight="Bold" Margin="7,0,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Width="1" Height="24" Background="{StaticResource BorderLightBrush}" Margin="0,0,12,0"/>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock x:Name="TopbarUserNameText" Text="Branch Manager"
+                                               Foreground="{StaticResource HeadingBrush}" FontSize="12" FontWeight="Bold"
+                                               HorizontalAlignment="Right"/>
+                                    <TextBlock Text="Console Active" Foreground="{StaticResource MutedBrush}" FontSize="9"
+                                               HorizontalAlignment="Right"/>
+                                </StackPanel>
+                                <Border Width="38" Height="38" CornerRadius="19" Background="{StaticResource NavyBrush}"
+                                        BorderBrush="{StaticResource BlueBrush}" BorderThickness="2" Margin="10,0,0,0">
+                                    <TextBlock x:Name="TopbarUserInitialText" Text="B" Foreground="White" FontWeight="Bold"
+                                               FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="28">
+                        <Grid>
+
+                            <!-- ===== DASHBOARD ===== -->
+                            <StackPanel x:Name="DashboardPage">
+                                <Grid Margin="0,0,0,16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="16"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="16"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <Border Grid.Column="0" CornerRadius="12" Padding="18">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                <GradientStop Color="#2C6FBB" Offset="0"/>
+                                                <GradientStop Color="#2563A8" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                        <StackPanel>
+                                            <TextBlock Text="FINGERPRINTS ENROLLED" Foreground="#DCEBFB" FontSize="10" FontWeight="Bold"/>
+                                            <TextBlock x:Name="EmployeesEnrolledText" Text="—" Foreground="White" FontSize="26"
+                                                       FontWeight="Black" Margin="0,6,0,0"/>
+                                            <TextBlock Text="Employees registered on this terminal" Foreground="#C6DCF5" FontSize="10"
+                                                       Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Grid.Column="2" CornerRadius="12" Padding="18">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                <GradientStop Color="#1E5DA6" Offset="0"/>
+                                                <GradientStop Color="#154682" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                        <StackPanel>
+                                            <TextBlock Text="PRESENT TODAY" Foreground="#DCEBFB" FontSize="10" FontWeight="Bold"/>
+                                            <TextBlock x:Name="PresentTodayCountText" Text="—" Foreground="White" FontSize="26"
+                                                       FontWeight="Black" Margin="0,6,0,0"/>
+                                            <TextBlock Text="Currently clocked in at this terminal" Foreground="#C6DCF5" FontSize="10"
+                                                       Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Grid.Column="4" CornerRadius="12" Padding="18">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                <GradientStop Color="#1B365D" Offset="0"/>
+                                                <GradientStop Color="#0F2A4A" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                        <StackPanel>
+                                            <TextBlock Text="DEVICE STATUS" Foreground="#DCEBFB" FontSize="10" FontWeight="Bold"/>
+                                            <TextBlock x:Name="DeviceStatusCardText" Text="Connecting" Foreground="White" FontSize="22"
+                                                       FontWeight="Black" Margin="0,6,0,0"/>
+                                            <TextBlock x:Name="DeviceSerialText" Text="SecuGen Reader" Foreground="#C6DCF5"
+                                                       FontSize="10" Margin="0,6,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+
+                                <Border x:Name="SystemAlertBorder" Background="{StaticResource NavyBrush}" CornerRadius="12"
+                                        Padding="16" Margin="0,0,0,16" Visibility="Collapsed">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Border Width="34" Height="34" Background="#334F5821" CornerRadius="8">
+                                            <TextBlock Text="&#xE7BA;" FontFamily="{StaticResource IconFont}" FontSize="18"
+                                                       Foreground="{StaticResource OrangeBrush}" HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"/>
+                                        </Border>
+                                        <TextBlock x:Name="SystemAlertText" Foreground="White" FontSize="12" FontWeight="SemiBold"
+                                                   Margin="12,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource CardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Today's Attendance Log" Style="{StaticResource SectionTitleStyle}"/>
+                                        <ItemsControl x:Name="DashboardAttendanceList" ItemTemplate="{StaticResource AttendanceRowTemplate}"/>
+                                        <TextBlock x:Name="DashboardEmptyText" Text="No employees have clocked in yet today."
+                                                   Foreground="{StaticResource MutedBrush}" FontSize="12" Visibility="Collapsed"
+                                                   Margin="0,8,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- ===== ENROLL ===== -->
+                            <Grid x:Name="EnrollPage" Visibility="Collapsed" MaxWidth="940" HorizontalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="5*"/>
+                                    <ColumnDefinition Width="20"/>
+                                    <ColumnDefinition Width="7*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Left: employee picker -->
+                                <Border Grid.Column="0" Style="{StaticResource CardStyle}" Padding="24" Margin="0">
+                                    <StackPanel>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                                            <TextBlock Text="&#xE77B;" FontFamily="{StaticResource IconFont}" FontSize="22"
+                                                       Foreground="{StaticResource BlueBrush}"/>
+                                            <StackPanel Margin="10,0,0,0">
+                                                <TextBlock Text="Select Employee" Foreground="{StaticResource HeadingBrush}"
+                                                           FontSize="14" FontWeight="Bold"/>
+                                                <TextBlock Text="Choose the staff member to enroll" Foreground="{StaticResource MutedBrush}"
+                                                           FontSize="11"/>
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <TextBlock Text="STAFF MEMBER" Style="{StaticResource LabelStyle}"/>
+                                        <ComboBox x:Name="EmployeeComboBox" DisplayMemberPath="DisplayLabel" Margin="0,0,0,14"
+                                                  SelectionChanged="EmployeeComboBox_SelectionChanged"/>
+
+                                        <Border x:Name="PreviewCard" Visibility="Collapsed" Background="#F8FAFC" BorderBrush="#E2E8F0"
+                                                BorderThickness="1" CornerRadius="10" Padding="14">
+                                            <StackPanel>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Border Width="44" Height="44" CornerRadius="22" Background="#DBEAFE">
+                                                        <TextBlock x:Name="PreviewInitialsText" Text="AY" Foreground="{StaticResource BlueBrush}"
+                                                                   FontWeight="Bold" FontSize="14" HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center"/>
+                                                    </Border>
+                                                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                                                        <TextBlock x:Name="PreviewNameText" Text="Employee" Foreground="{StaticResource HeadingBrush}"
+                                                                   FontSize="13" FontWeight="ExtraBold"/>
+                                                        <TextBlock x:Name="PreviewPositionText" Text="Position" Foreground="#64748B" FontSize="11"/>
+                                                        <Border x:Name="PreviewStatusPill" HorizontalAlignment="Left" CornerRadius="999"
+                                                                Padding="8,1" Margin="0,4,0,0" BorderThickness="1"
+                                                                Background="#FFFBEB" BorderBrush="#FDE68A">
+                                                            <TextBlock x:Name="PreviewStatusText" Text="Fingerprint pending"
+                                                                       Foreground="#B45309" FontSize="10" FontWeight="Bold"/>
+                                                        </Border>
+                                                    </StackPanel>
+                                                </StackPanel>
+                                                <Grid Margin="0,12,0,0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel>
+                                                        <TextBlock Text="Employee No." Foreground="{StaticResource MutedBrush}" FontSize="10"/>
+                                                        <TextBlock x:Name="PreviewNumberText" Text="—" Foreground="#334155" FontSize="11"
+                                                                   FontWeight="SemiBold"/>
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="1">
+                                                        <TextBlock Text="Branch" Foreground="{StaticResource MutedBrush}" FontSize="10"/>
+                                                        <TextBlock x:Name="PreviewBranchText" Text="—" Foreground="#334155" FontSize="11"
+                                                                   FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                    </StackPanel>
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border BorderBrush="#F1F5F9" BorderThickness="0,1,0,0" Margin="0,18,0,0" Padding="0,12,0,0">
+                                            <Grid>
+                                                <TextBlock Text="Sensor: SecuGen optical" Foreground="#64748B" FontSize="11"/>
+                                                <TextBlock x:Name="EnrollSensorText" Text="Checking…" Foreground="#059669" FontSize="11"
+                                                           FontWeight="Bold" HorizontalAlignment="Right"/>
+                                            </Grid>
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Right: capture stage -->
+                                <Border Grid.Column="2" Style="{StaticResource CardStyle}" Padding="28" Margin="0">
+                                    <StackPanel>
+                                        <Grid>
+                                            <TextBlock Text="BIOMETRIC CAPTURE" Foreground="{StaticResource MutedBrush}" FontSize="11"
+                                                       FontWeight="Bold" VerticalAlignment="Center"/>
+                                            <Border x:Name="EnrollStagePill" HorizontalAlignment="Right" CornerRadius="999"
+                                                    Padding="10,3" Background="#DBEAFE">
+                                                <TextBlock x:Name="EnrollStagePillText" Text="Ready" Foreground="{StaticResource BlueBrush}"
+                                                           FontSize="11" FontWeight="Bold"/>
+                                            </Border>
+                                        </Grid>
+
+                                        <Grid Width="220" Height="210" HorizontalAlignment="Center" Margin="0,14,0,6">
+                                            <Ellipse x:Name="EnrollPulseRing" Width="190" Height="190" Stroke="#662563A8"
+                                                     StrokeThickness="2" Fill="#142563A8" RenderTransformOrigin="0.5,0.5"
+                                                     Visibility="Hidden">
+                                                <Ellipse.RenderTransform>
+                                                    <ScaleTransform x:Name="EnrollPulseScale"/>
+                                                </Ellipse.RenderTransform>
+                                            </Ellipse>
+                                            <Border Width="132" Height="150" CornerRadius="16" BorderBrush="#CC334155" BorderThickness="4">
+                                                <Border.Background>
+                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                        <GradientStop Color="#0F172A" Offset="0"/>
+                                                        <GradientStop Color="#0F2A4A" Offset="1"/>
+                                                    </LinearGradientBrush>
+                                                </Border.Background>
+                                                <Border Margin="8" CornerRadius="10" Background="#09182B" BorderBrush="#662C6FBB"
+                                                        BorderThickness="1" ClipToBounds="True">
+                                                    <Grid>
+                                                        <TextBlock x:Name="EnrollFingerGlyph" Text="&#xE928;"
+                                                                   FontFamily="{StaticResource IconFont}" FontSize="58"
+                                                                   Foreground="#67E8F9" HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center"/>
+                                                        <Border x:Name="EnrollLaser" Height="3" VerticalAlignment="Top" Visibility="Hidden">
+                                                            <Border.Background>
+                                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                                                    <GradientStop Color="#0022D3EE" Offset="0"/>
+                                                                    <GradientStop Color="#FF22D3EE" Offset="0.5"/>
+                                                                    <GradientStop Color="#0022D3EE" Offset="1"/>
+                                                                </LinearGradientBrush>
+                                                            </Border.Background>
+                                                            <Border.RenderTransform>
+                                                                <TranslateTransform x:Name="EnrollLaserTranslate"/>
+                                                            </Border.RenderTransform>
+                                                        </Border>
+                                                    </Grid>
+                                                </Border>
+                                            </Border>
+                                        </Grid>
+
+                                        <TextBlock x:Name="EnrollHeadlineText" Text="Ready to enroll" Foreground="{StaticResource HeadingBrush}"
+                                                   FontSize="16" FontWeight="ExtraBold" HorizontalAlignment="Center" TextAlignment="Center"/>
+                                        <TextBlock x:Name="EnrollSubtext" Text="Select an employee, then press Enroll Fingerprint."
+                                                   Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap"
+                                                   TextAlignment="Center" MaxWidth="360" Margin="0,4,0,0"/>
+
+                                        <!-- Real stages: Select → Scan → Register -->
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
+                                            <StackPanel Orientation="Horizontal">
+                                                <Border x:Name="Step1Circle" Width="22" Height="22" CornerRadius="11">
+                                                    <TextBlock x:Name="Step1Text" FontSize="11" FontWeight="Bold"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                                <TextBlock x:Name="Step1Label" Text="Select" FontSize="12" FontWeight="Bold"
+                                                           Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                            <Border Width="24" Height="2" Background="#E2E8F0" Margin="10,0" VerticalAlignment="Center"/>
+                                            <StackPanel Orientation="Horizontal">
+                                                <Border x:Name="Step2Circle" Width="22" Height="22" CornerRadius="11">
+                                                    <TextBlock x:Name="Step2Text" FontSize="11" FontWeight="Bold"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                                <TextBlock x:Name="Step2Label" Text="Scan" FontSize="12" FontWeight="Bold"
+                                                           Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                            <Border Width="24" Height="2" Background="#E2E8F0" Margin="10,0" VerticalAlignment="Center"/>
+                                            <StackPanel Orientation="Horizontal">
+                                                <Border x:Name="Step3Circle" Width="22" Height="22" CornerRadius="11">
+                                                    <TextBlock x:Name="Step3Text" FontSize="11" FontWeight="Bold"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                                <TextBlock x:Name="Step3Label" Text="Register" FontSize="12" FontWeight="Bold"
+                                                           Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <Border BorderBrush="#F1F5F9" BorderThickness="0,1,0,0" Margin="0,20,0,0" Padding="0,16,0,0">
+                                            <Button x:Name="EnrollButton" Background="{StaticResource BlueBrush}"
+                                                    HorizontalAlignment="Center" Padding="26,11" Click="EnrollButton_Click">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="&#xE928;" FontFamily="{StaticResource IconFont}" FontSize="14"
+                                                               Foreground="White" VerticalAlignment="Center"/>
+                                                    <TextBlock Text="Enroll Fingerprint" FontWeight="SemiBold" FontSize="13"
+                                                               Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Button>
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <!-- ===== ATTENDANCE ===== -->
+                            <StackPanel x:Name="AttendancePage" Visibility="Collapsed">
+                                <Border Style="{StaticResource CardStyle}">
+                                    <StackPanel>
+                                        <Grid Margin="0,0,0,8">
+                                            <StackPanel>
+                                                <TextBlock Text="Today's Attendance" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,2"/>
+                                                <TextBlock x:Name="AttendanceSummaryText" Text="" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+                                            </StackPanel>
+                                            <Button Content="Refresh" Style="{StaticResource SecondaryButtonStyle}"
+                                                    HorizontalAlignment="Right" VerticalAlignment="Top" Padding="14,7"
+                                                    Click="RefreshAttendanceButton_Click"/>
+                                        </Grid>
+                                        <ItemsControl x:Name="AttendanceList" ItemTemplate="{StaticResource AttendanceRowTemplate}"/>
+                                        <TextBlock x:Name="AttendanceEmptyText" Text="No scans recorded today."
+                                                   Foreground="{StaticResource MutedBrush}" FontSize="12" Visibility="Collapsed"
+                                                   Margin="0,8,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- ===== DEVICE ===== -->
+                            <StackPanel x:Name="DevicePage" Visibility="Collapsed">
+                                <Border Style="{StaticResource CardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Device &amp; Sync" Style="{StaticResource SectionTitleStyle}"/>
+                                        <Grid Margin="0,4,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="200"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+
+                                            <TextBlock Grid.Row="0" Text="Fingerprint reader" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,6"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="1" x:Name="DevReaderText" Text="—" Foreground="{StaticResource HeadingBrush}"
+                                                       FontSize="12" FontWeight="SemiBold" Margin="0,6"/>
+                                            <TextBlock Grid.Row="1" Text="Serial number" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,6"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="1" x:Name="DevSerialText" Text="—" Foreground="{StaticResource HeadingBrush}"
+                                                       FontSize="12" FontWeight="SemiBold" Margin="0,6"/>
+                                            <TextBlock Grid.Row="2" Text="Fingerprints enrolled" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,6"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="1" x:Name="DevEnrolledText" Text="—" Foreground="{StaticResource HeadingBrush}"
+                                                       FontSize="12" FontWeight="SemiBold" Margin="0,6"/>
+                                            <TextBlock Grid.Row="3" Text="Scans waiting to sync" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,6"/>
+                                            <TextBlock Grid.Row="3" Grid.Column="1" x:Name="DevPendingText" Text="—" Foreground="{StaticResource HeadingBrush}"
+                                                       FontSize="12" FontWeight="SemiBold" Margin="0,6"/>
+                                        </Grid>
+                                        <Button Content="Refresh" Style="{StaticResource SecondaryButtonStyle}" HorizontalAlignment="Left"
+                                                Margin="0,12,0,0" Padding="14,7" Click="RefreshDeviceButton_Click"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- ===== HELP ===== -->
+                            <StackPanel x:Name="HelpPage" Visibility="Collapsed">
+                                <Border Style="{StaticResource CardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="Quick Help" Style="{StaticResource SectionTitleStyle}"/>
+                                        <TextBlock TextWrapping="Wrap" Foreground="{StaticResource HeadingBrush}" FontSize="12" LineHeight="20">
+                                            <Run FontWeight="Bold" Text="Clocking in / out"/><LineBreak/>
+                                            <Run Text="Employees place their enrolled finger on the reader at the kiosk screen. No login is needed. The first scan of the day clocks in; the next clocks out."/><LineBreak/><LineBreak/>
+                                            <Run FontWeight="Bold" Text="Enrolling someone"/><LineBreak/>
+                                            <Run Text="Open Enroll Employee, choose the staff member, press Enroll Fingerprint and place their finger on the reader."/><LineBreak/><LineBreak/>
+                                            <Run FontWeight="Bold" Text="Returning to the kiosk"/><LineBreak/>
+                                            <Run Text="Use the lock icon at the bottom of the sidebar. The console also locks itself after 3 minutes without activity. Scanning keeps running the whole time."/><LineBreak/><LineBreak/>
+                                            <Run FontWeight="Bold" Text="Working offline"/><LineBreak/>
+                                            <Run Text="Scans are saved on this computer and sync to the server automatically when the connection returns. Signing in and enrolling need a connection."/>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+
+                        </Grid>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <!-- Layer 2: toast -->
+        <Border x:Name="ToastBorder" Visibility="Collapsed" CornerRadius="8" Padding="14,10"
+                HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,24" MaxWidth="440">
+            <TextBlock x:Name="ToastText" Foreground="White" FontSize="12" TextWrapping="Wrap" TextAlignment="Center"/>
+        </Border>
+    </Grid>
+</UserControl>

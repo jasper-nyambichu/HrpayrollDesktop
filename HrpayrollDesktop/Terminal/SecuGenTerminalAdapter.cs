@@ -27,21 +27,35 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
         Path.Combine(AppContext.BaseDirectory, "enrolled-templates.json");
 
     private Dictionary<string, byte[]> _templates = new();
+    private readonly object _templateSync = new();
     private int _idleTicks;
 
-    // Guards every SDK call so the UI thread (segment 4 onward) and the
-    // capture loop can never touch the device at the same instant — this
-    // is the concrete fix for the "single point of failure if UI hangs"
-    // risk: the lock has a timeout, so a stuck UI call can't freeze
-    // capture forever.
+    // Guards every SDK call so the UI thread and the capture loop can never
+    // touch the device at the same instant. Lock waits have timeouts so a
+    // stuck UI call can't freeze capture forever.
     private readonly SemaphoreSlim _deviceLock = new(1, 1);
+
+    public event Action? FingerCaptured;
+    public event Action? FingerNotRecognized;
 
     public SecuGenTerminalAdapter(ILogger<SecuGenTerminalAdapter> logger)
     {
         _logger = logger;
     }
+
     private string? _deviceSerial;
     public string? DeviceSerial => _deviceSerial;
+
+    public int EnrolledCount
+    {
+        get { lock (_templateSync) return _templates.Count; }
+    }
+
+    public bool IsEnrolled(string terminalUserId)
+    {
+        lock (_templateSync) return _templates.ContainsKey(terminalUserId);
+    }
+
     public async Task ConnectAsync(CancellationToken cancellationToken)
     {
         await _deviceLock.WaitAsync(cancellationToken);
@@ -64,9 +78,9 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
             {
                 _imageWidth = info.ImageWidth;
                 _imageHeight = info.ImageHeight;
-                _deviceSerial = System.Text.Encoding.ASCII.GetString(info.DeviceSN).TrimEnd('\0');   // ADD
+                _deviceSerial = Encoding.ASCII.GetString(info.DeviceSN).TrimEnd('\0');
                 _logger.LogInformation("SecuGen device connected. Serial={Serial}, {Width}x{Height}",
-                    System.Text.Encoding.ASCII.GetString(info.DeviceSN).TrimEnd('\0'), _imageWidth, _imageHeight);
+                    _deviceSerial, _imageWidth, _imageHeight);
             }
             else
             {
@@ -88,15 +102,12 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
         if (_fpm is null)
             throw new InvalidOperationException("Device not connected. Call ConnectAsync first.");
 
-        if (_templates.Count == 0)
+        if (EnrolledCount == 0)
         {
             LogIdleHeartbeat("No employees enrolled yet — nothing to match against.");
             return Array.Empty<TerminalEvent>();
         }
 
-        // Timeout on the lock, not just a wait — if enrollment mode is
-        // holding the device for a long capture, polling backs off
-        // cleanly instead of piling up waiting threads.
         if (!await _deviceLock.WaitAsync(TimeSpan.FromMilliseconds(200), cancellationToken))
             return Array.Empty<TerminalEvent>();
 
@@ -110,11 +121,13 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
             }
 
             _logger.LogInformation("Finger detected — matching...");
+            SafeRaise(FingerCaptured);
 
             var matchedUserId = IdentifyTemplate(template);
             if (matchedUserId is null)
             {
                 _logger.LogWarning("Fingerprint not recognized. Contact HR to enroll this finger.");
+                SafeRaise(FingerNotRecognized);
                 return Array.Empty<TerminalEvent>();
             }
 
@@ -153,8 +166,11 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
                 return false;
             }
 
-            _templates[terminalUserId] = template;
-            SaveTemplates();
+            lock (_templateSync)
+            {
+                _templates[terminalUserId] = template;
+                SaveTemplates();
+            }
 
             _logger.LogInformation("Enrollment successful for terminalUserId={TerminalUserId}.", terminalUserId);
             return true;
@@ -170,16 +186,25 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
         await _deviceLock.WaitAsync();
         try
         {
-            if (_templates.Remove(terminalUserId))
+            lock (_templateSync)
             {
-                SaveTemplates();
-                _logger.LogWarning("Rolled back local enrollment for terminalUserId={TerminalUserId} after backend registration failure.", terminalUserId);
+                if (_templates.Remove(terminalUserId))
+                {
+                    SaveTemplates();
+                    _logger.LogWarning("Rolled back local enrollment for terminalUserId={TerminalUserId} after backend registration failure.", terminalUserId);
+                }
             }
         }
         finally
         {
             _deviceLock.Release();
         }
+    }
+
+    private void SafeRaise(Action? handler)
+    {
+        try { handler?.Invoke(); }
+        catch (Exception ex) { _logger.LogWarning(ex, "A terminal event handler threw; ignoring."); }
     }
 
     private void LogIdleHeartbeat(string message)
@@ -226,6 +251,8 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
         return null;
     }
 
+    // Called only from PollEventsAsync, which holds _deviceLock. Every
+    // template mutation also holds _deviceLock, so iterating here is safe.
     private string? IdentifyTemplate(byte[] capturedTemplate)
     {
         if (_fpm is null) return null;
@@ -246,7 +273,7 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
     {
         if (!File.Exists(TemplateStorePath))
         {
-            _templates = new Dictionary<string, byte[]>();
+            lock (_templateSync) _templates = new Dictionary<string, byte[]>();
             return;
         }
 
@@ -254,16 +281,18 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
         {
             var json = File.ReadAllText(TemplateStorePath);
             var stored = JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new();
-            _templates = stored.ToDictionary(kv => kv.Key, kv => Convert.FromBase64String(kv.Value));
-            _logger.LogInformation("Loaded {Count} enrolled template(s) from {Path}.", _templates.Count, TemplateStorePath);
+            var loaded = stored.ToDictionary(kv => kv.Key, kv => Convert.FromBase64String(kv.Value));
+            lock (_templateSync) _templates = loaded;
+            _logger.LogInformation("Loaded {Count} enrolled template(s) from {Path}.", loaded.Count, TemplateStorePath);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to load enrolled templates from {Path}; starting empty.", TemplateStorePath);
-            _templates = new Dictionary<string, byte[]>();
+            lock (_templateSync) _templates = new Dictionary<string, byte[]>();
         }
     }
 
+    // Caller must hold _templateSync.
     private void SaveTemplates()
     {
         var toStore = _templates.ToDictionary(kv => kv.Key, kv => Convert.ToBase64String(kv.Value));

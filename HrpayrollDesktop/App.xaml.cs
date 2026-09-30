@@ -1,4 +1,5 @@
 ﻿using HrpayrollDesktop.Config;
+using HrpayrollDesktop.Local;
 using HrpayrollDesktop.OfflineQueue;
 using HrpayrollDesktop.Sync;
 using HrpayrollDesktop.Terminal;
@@ -39,17 +40,11 @@ public partial class App : System.Windows.Application
             {
                 services.Configure<AgentSettings>(context.Configuration.GetSection("Agent"));
                 services.AddSingleton<OfflineQueueStore>();
+                services.AddSingleton<LocalAttendanceStore>();
                 services.AddSingleton<ITerminalAdapter, SecuGenTerminalAdapter>();
 
-                // FIX: AddHttpClient<BackendApiClient>() registers BackendApiClient
-                // as TRANSIENT by design — every GetRequiredService<BackendApiClient>()
-                // call (here, in MainWindow, and inside AttendanceEngine's own
-                // constructor) was returning a SEPARATE, unconfigured instance.
-                // ConfigureDeviceCredentials() on one instance never touched the
-                // others, which is why RegisterEnrollmentAsync kept throwing even
-                // after "configuring" credentials. This registers exactly one
-                // BackendApiClient, shared everywhere, while still using
-                // IHttpClientFactory underneath for proper handler pooling.
+                // One shared BackendApiClient (AddHttpClient<T> would register it
+                // transient and each consumer would get an unconfigured copy).
                 services.AddHttpClient("BackendApi");
                 services.AddSingleton<BackendApiClient>(sp =>
                 {
@@ -66,9 +61,7 @@ public partial class App : System.Windows.Application
 
         var apiClient = _host.Services.GetRequiredService<BackendApiClient>();
 
-        // TEMPORARY: manual config-file credentials for early testing, until
-        // real device registration is confirmed working end-to-end.
-        // Replace with DPAPI-backed device setup before real branch deployment.
+        // TEMPORARY: config-file credentials until the DPAPI device setup is wired in.
         var deviceConfig = _host.Services.GetRequiredService<IConfiguration>().GetSection("Device");
         var deviceSerial = deviceConfig["DeviceSerial"];
         var deviceToken = deviceConfig["DeviceToken"];
@@ -78,29 +71,28 @@ public partial class App : System.Windows.Application
             apiClient.ConfigureDeviceCredentials(deviceSerial, deviceToken);
         }
 
-        // Login gate: nothing (device connect, polling, sync) runs until this
-        // succeeds — the host is deliberately not started yet.
-        var loginWindow = new LoginWindow(apiClient);
-        var loggedIn = loginWindow.ShowDialog();
-
-        if (loggedIn != true || loginWindow.Session is null)
-        {
-            Shutdown();
-            return;
-        }
-
-        var session = loginWindow.Session;
         var engine = _host.Services.GetRequiredService<AttendanceEngine>();
         var terminalAdapter = _host.Services.GetRequiredService<ITerminalAdapter>();
+        var localStore = _host.Services.GetRequiredService<LocalAttendanceStore>();
+        localStore.Initialize(); // idempotent; guarantees tables exist before any window reads them
 
-        // Construct MainWindow (subscribes to engine events) BEFORE starting the
-        // host, preserving the earlier fix for the event-subscription race.
-        var mainWindow = new MainWindow(engine, terminalAdapter, apiClient, session);
-        MainWindow = mainWindow;
-        mainWindow.Show();
+        // No login gate: the kiosk is the default screen and capture runs all day.
+        // The shell subscribes to engine events in its constructor, BEFORE the
+        // host starts, so no early event is missed.
+        var shell = new ShellWindow(engine, terminalAdapter, apiClient, localStore);
+        MainWindow = shell;
+        shell.Show();
 
         ShutdownMode = ShutdownMode.OnMainWindowClose;
-        await _host.StartAsync();
+
+        try
+        {
+            await _host.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            LogCrash("Host start", ex);
+        }
     }
 
     protected override async void OnExit(ExitEventArgs e)

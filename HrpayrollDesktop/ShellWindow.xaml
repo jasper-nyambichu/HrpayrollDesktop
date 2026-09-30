@@ -1,0 +1,14 @@
+﻿<Window x:Class="HrpayrollDesktop.ShellWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:HrpayrollDesktop"
+        Title="Dhwarsh HR"
+        WindowState="Maximized" WindowStyle="None" ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        Background="#0B192C">
+    <Grid>
+        <local:KioskView x:Name="Kiosk"/>
+        <local:ConsoleView x:Name="ManagerConsole" Visibility="Collapsed"/>
+        <local:LoginView x:Name="Login" Visibility="Collapsed"/>
+    </Grid>
+</Window>

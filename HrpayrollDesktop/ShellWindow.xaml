@@ -3,12 +3,124 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:HrpayrollDesktop"
         Title="Dhwarsh HR"
-        WindowState="Maximized" WindowStyle="None" ResizeMode="NoResize"
+        Width="1240" Height="780" MinWidth="960" MinHeight="640"
+        WindowState="Maximized" WindowStyle="None" ResizeMode="CanResize"
         WindowStartupLocation="CenterScreen"
-        Background="#0B192C">
+        Background="#0B192C" BorderBrush="#33FFFFFF" BorderThickness="1"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        StateChanged="Window_StateChanged"
+        PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown">
+
+    <Window.Resources>
+        <!-- Dark theme (kiosk / login) -->
+        <Style x:Key="CaptionButton" TargetType="Button">
+            <Setter Property="Width" Value="46"/>
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="Foreground" Value="#CBD5E1"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#33FFFFFF"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#4DFFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="CaptionCloseButton" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#E81123"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#F1707A"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Light theme (manager console has a white header) -->
+        <Style x:Key="CaptionButtonLight" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
+            <Setter Property="Foreground" Value="#4A5E5C"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#14000000"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#24000000"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="CaptionCloseButtonLight" TargetType="Button" BasedOn="{StaticResource CaptionButtonLight}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#E81123"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#F1707A"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
     <Grid>
         <local:KioskView x:Name="Kiosk"/>
         <local:ConsoleView x:Name="ManagerConsole" Visibility="Collapsed"/>
         <local:LoginView x:Name="Login" Visibility="Collapsed"/>
+
+        <!-- Window controls: always on top, top-right, on every screen -->
+        <Border x:Name="CaptionBar" HorizontalAlignment="Right" VerticalAlignment="Top" Height="36"
+                Background="Transparent">
+            <StackPanel Orientation="Horizontal">
+                <Button x:Name="MinButton" Style="{StaticResource CaptionButton}" Content="&#xE921;"
+                        ToolTip="Minimize" Click="MinButton_Click"/>
+                <Button x:Name="MaxButton" Style="{StaticResource CaptionButton}" Content="&#xE923;"
+                        ToolTip="Restore down" Click="MaxButton_Click"/>
+                <Button x:Name="CloseButton" Style="{StaticResource CaptionCloseButton}" Content="&#xE8BB;"
+                        ToolTip="Close" Click="CloseButton_Click"/>
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>

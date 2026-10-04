@@ -9,15 +9,20 @@ public interface ITerminalAdapter
 {
     string? DeviceSerial { get; }
 
-    /// <summary>Number of fingerprint templates enrolled on this terminal.</summary>
     int EnrolledCount { get; }
     bool IsEnrolled(string terminalUserId);
 
-    /// <summary>A usable fingerprint image was captured and matching is starting.</summary>
+    /// <summary>A usable fingerprint was detected and matching is starting (once per touch).</summary>
     event Action? FingerCaptured;
 
-    /// <summary>A fingerprint was captured but matched nobody.</summary>
+    /// <summary>The touch was matched against everyone and nobody matched (once per touch).</summary>
     event Action? FingerNotRecognized;
+
+    /// <summary>The finger has been lifted; the reader is ready for the next scan.</summary>
+    event Action? FingerRemoved;
+
+    /// <summary>A finger is on the glass but the image is too weak to read (once per touch).</summary>
+    event Action? FingerPoorQuality;
 
     Task ConnectAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<TerminalEvent>> PollEventsAsync(CancellationToken cancellationToken);
@@ -25,8 +30,6 @@ public interface ITerminalAdapter
     Task RemoveEnrollmentAsync(string terminalUserId);
 }
 
-// Deliberately no EventType — the device layer only identifies WHO scanned.
-// AttendanceEngine decides CLOCK_IN vs CLOCK_OUT using restart-safe persisted state.
 public record TerminalEvent(
     string EventId,
     string TerminalUserId,

@@ -120,15 +120,26 @@ public class LocalAttendanceStore
         command.Parameters.AddWithValue("$id", terminalUserId);
 
         using var reader = command.ExecuteReader();
-        if (!reader.Read()) return null;
+        return reader.Read() ? ReadEmployee(reader) : null;
+    }
 
-        return new EmployeeDirectoryEntry(
-            reader.GetString(0),
-            reader.GetInt64(1),
-            reader.GetString(2),
-            reader.GetString(3),
-            reader.IsDBNull(4) ? null : reader.GetString(4),
-            reader.IsDBNull(5) ? null : reader.GetString(5));
+    /// <summary>Every employee the console has loaded for this branch (enrolled or not), A-Z.</summary>
+    public List<EmployeeDirectoryEntry> GetAllEmployees()
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT TerminalUserId, EmployeeId, FullName, EmployeeNumber, Position, BranchName
+            FROM employee_directory ORDER BY FullName COLLATE NOCASE;
+            """;
+
+        var results = new List<EmployeeDirectoryEntry>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            results.Add(ReadEmployee(reader));
+        return results;
     }
 
     public void AppendLog(string eventId, string terminalUserId, string eventType, DateTime timestampUtc)
@@ -162,14 +173,24 @@ public class LocalAttendanceStore
             LIMIT 1;
             """;
         command.Parameters.AddWithValue("$id", terminalUserId);
-        command.Parameters.AddWithValue("$start", StartOfTodayUtc());
+        command.Parameters.AddWithValue("$start", DateTime.Today.ToUniversalTime().ToString("O"));
 
         using var reader = command.ExecuteReader();
         return reader.Read() ? ReadEntry(reader) : null;
     }
 
     /// <summary>Today's scans (local calendar day), oldest first.</summary>
-    public List<AttendanceLogEntry> GetTodayLog()
+    public List<AttendanceLogEntry> GetTodayLog() => GetLogForDay(DateTime.Today);
+
+    /// <summary>Scans on one local calendar day, oldest first.</summary>
+    public List<AttendanceLogEntry> GetLogForDay(DateTime day) =>
+        GetLogBetween(day.Date, day.Date.AddDays(1));
+
+    /// <summary>Scans from the start of the given local day until now, oldest first.</summary>
+    public List<AttendanceLogEntry> GetLogSince(DateTime fromLocalDay) =>
+        GetLogBetween(fromLocalDay.Date, DateTime.Today.AddDays(1));
+
+    public List<AttendanceLogEntry> GetLogBetween(DateTime fromLocal, DateTime toLocalExclusive)
     {
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
@@ -178,10 +199,11 @@ public class LocalAttendanceStore
         command.CommandText = """
             SELECT EventId, TerminalUserId, EventType, Timestamp
             FROM attendance_log
-            WHERE Timestamp >= $start
+            WHERE Timestamp >= $from AND Timestamp < $to
             ORDER BY Timestamp ASC;
             """;
-        command.Parameters.AddWithValue("$start", StartOfTodayUtc());
+        command.Parameters.AddWithValue("$from", fromLocal.ToUniversalTime().ToString("O"));
+        command.Parameters.AddWithValue("$to", toLocalExclusive.ToUniversalTime().ToString("O"));
 
         var results = new List<AttendanceLogEntry>();
         using var reader = command.ExecuteReader();
@@ -190,7 +212,13 @@ public class LocalAttendanceStore
         return results;
     }
 
-    private static string StartOfTodayUtc() => DateTime.Today.ToUniversalTime().ToString("O");
+    private static EmployeeDirectoryEntry ReadEmployee(SqliteDataReader reader) => new(
+        reader.GetString(0),
+        reader.GetInt64(1),
+        reader.GetString(2),
+        reader.GetString(3),
+        reader.IsDBNull(4) ? null : reader.GetString(4),
+        reader.IsDBNull(5) ? null : reader.GetString(5));
 
     private static AttendanceLogEntry ReadEntry(SqliteDataReader reader) => new(
         reader.GetString(0),

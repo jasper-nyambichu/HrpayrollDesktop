@@ -16,13 +16,13 @@ public class AttendanceEngine : BackgroundService
 {
     private const int QueueDepthWarningThreshold = 200;
 
-    // Same person scanning again within this window is ignored silently
-    // (finger still resting on the glass while the success screen shows).
-    private static readonly TimeSpan SilentRepeatWindow = TimeSpan.FromSeconds(6);
+    // The reader is polled quickly so a finger is noticed (and lifts are detected) promptly.
+    // The one-touch-one-result logic lives in the adapter, so a fast poll never causes repeat scans.
+    private static readonly TimeSpan CapturePollInterval = TimeSpan.FromMilliseconds(200);
 
-    // Within this window a repeat scan shows "already recorded" instead of
-    // flipping clock-in to clock-out by accident.
-    private static readonly TimeSpan ScanCooldown = TimeSpan.FromSeconds(60);
+    // Someone who lifts and scans again within this window sees "already recorded"
+    // instead of accidentally flipping CLOCK_IN to CLOCK_OUT.
+    private static readonly TimeSpan ScanCooldown = TimeSpan.FromSeconds(30);
 
     private readonly ILogger<AttendanceEngine> _logger;
     private readonly ITerminalAdapter _terminalAdapter;
@@ -31,10 +31,12 @@ public class AttendanceEngine : BackgroundService
     private readonly BackendApiClient _apiClient;
     private readonly AgentSettings _settings;
 
-    public event Action<string, string, DateTime>? MatchOccurred;    // terminalUserId, eventType, timestampUtc
-    public event Action<string, string, DateTime>? DuplicateScan;    // terminalUserId, lastEventType, lastTimestampUtc
+    public event Action<string, string, DateTime>? MatchOccurred;   // terminalUserId, eventType, timestampUtc
+    public event Action<string, string, DateTime>? DuplicateScan;   // terminalUserId, lastEventType, lastTimestampUtc
     public event Action? FingerCaptured;
     public event Action? FingerNotRecognized;
+    public event Action? FingerRemoved;
+    public event Action? FingerPoorQuality;
     public event Action<string>? DeviceFault;
     public event Action? DeviceReady;
 
@@ -59,6 +61,8 @@ public class AttendanceEngine : BackgroundService
 
         _terminalAdapter.FingerCaptured += () => FingerCaptured?.Invoke();
         _terminalAdapter.FingerNotRecognized += () => FingerNotRecognized?.Invoke();
+        _terminalAdapter.FingerRemoved += () => FingerRemoved?.Invoke();
+        _terminalAdapter.FingerPoorQuality += () => FingerPoorQuality?.Invoke();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -87,8 +91,6 @@ public class AttendanceEngine : BackgroundService
 
     private async Task RunPollingLoopAsync(CancellationToken stoppingToken)
     {
-        var interval = TimeSpan.FromSeconds(Math.Max(_settings.PollIntervalSeconds, 1));
-
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -104,7 +106,7 @@ public class AttendanceEngine : BackgroundService
                 _logger.LogWarning(ex, "Unexpected error polling terminal; will retry next cycle.");
             }
 
-            await Task.Delay(interval, stoppingToken);
+            await Task.Delay(CapturePollInterval, stoppingToken);
         }
     }
 
@@ -139,18 +141,11 @@ public class AttendanceEngine : BackgroundService
         {
             var last = _localStore.GetLastEventToday(evt.TerminalUserId);
 
-            if (last is not null)
+            // Every touch gets exactly one visible outcome: success, already-recorded, or not-recognized.
+            if (last is not null && (evt.Timestamp - last.TimestampUtc) < ScanCooldown)
             {
-                var since = evt.Timestamp - last.TimestampUtc;
-
-                if (since < SilentRepeatWindow)
-                    continue;
-
-                if (since < ScanCooldown)
-                {
-                    DuplicateScan?.Invoke(evt.TerminalUserId, last.EventType, last.TimestampUtc);
-                    continue;
-                }
+                DuplicateScan?.Invoke(evt.TerminalUserId, last.EventType, last.TimestampUtc);
+                continue;
             }
 
             // Toggle is per calendar day: no scan yet today => always CLOCK_IN.

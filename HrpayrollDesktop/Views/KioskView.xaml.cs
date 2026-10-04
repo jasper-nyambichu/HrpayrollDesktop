@@ -1,5 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
+using System.Media;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -9,15 +12,22 @@ using System.Windows.Threading;
 
 namespace HrpayrollDesktop;
 
+/// <summary>One line in the kiosk's "Today's activity" panel.</summary>
+public sealed record RecentScan(string Name, bool IsClockIn, DateTime LocalTime);
+
 public partial class KioskView : UserControl
 {
+    private const int MinScanMs = 700;            // keep "Scanning" visible at least this long
+    private const bool SoundsEnabled = true;
 
-    // Matching is near-instant; hold "Scanning" briefly so it doesn't flash.
-    private const int MinScanMs = 700;
+    private sealed record RecentRow(string Name, string Initials, string ActionText, string TimeText,
+        Brush AccentBackground, Brush AccentForeground);
 
     private readonly DispatcherTimer _clockTimer;
     private readonly DispatcherTimer _resetTimer;
     private readonly DispatcherTimer _deliverTimer;
+    private readonly DispatcherTimer _scanWatchdog;
+    private readonly DispatcherTimer _hintTimer;
 
     private Action? _deliverAction;
     private DateTime _scanStartedUtc = DateTime.MinValue;
@@ -47,7 +57,20 @@ public partial class KioskView : UserControl
             action?.Invoke();
         };
 
+        // Safety net: if a scan never produces a result, don't stay on "Scanning" forever.
+        _scanWatchdog = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        _scanWatchdog.Tick += (_, _) =>
+        {
+            _scanWatchdog.Stop();
+            if (ScanningPanel.Visibility == Visibility.Visible) ShowIdle();
+        };
+
+        _hintTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+        _hintTimer.Tick += (_, _) => ClearHint();
+
         Loaded += (_, _) => StartIdleAnimation();
+        SizeChanged += (_, _) => RecentCard.Visibility = ActualWidth >= 1000 ? Visibility.Visible : Visibility.Collapsed;
+
         ShowIdle();
     }
 
@@ -73,27 +96,82 @@ public partial class KioskView : UserControl
 
     private void TryAgainButton_Click(object sender, RoutedEventArgs e) => ShowIdle();
 
+    // ===== Today's activity =====
+
+    public void SetRecent(IReadOnlyList<RecentScan> scans, int presentCount)
+    {
+        var inBg = Br("#3310B981"); var inFg = Br("#B7F568");
+        var outBg = Br("#331C6EB4"); var outFg = Br("#9FCAFF");
+
+        RecentList.ItemsSource = scans.Select(s => new RecentRow(
+            s.Name,
+            Initials(s.Name),
+            s.IsClockIn ? "Clocked in" : "Clocked out",
+            s.LocalTime.ToString("hh:mm tt", CultureInfo.InvariantCulture),
+            s.IsClockIn ? inBg : outBg,
+            s.IsClockIn ? inFg : outFg)).ToList();
+
+        RecentEmptyText.Visibility = scans.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        PresentCountText.Text = $"{presentCount} in";
+    }
+
+    // ===== Hints =====
+
+    public void ShowHint(string text)
+    {
+        if (IdlePanel.Visibility != Visibility.Visible) return;
+
+        HintText.Text = text;
+        HintBorder.Visibility = Visibility.Visible;
+        _hintTimer.Stop();
+        _hintTimer.Start();
+    }
+
+    public void ClearHint()
+    {
+        _hintTimer.Stop();
+        HintBorder.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>The reader reports the finger has been lifted.</summary>
+    public void NotifyFingerRemoved()
+    {
+        ClearHint();
+
+        if (NotRecognizedPanel.Visibility == Visibility.Visible)
+        {
+            NotRecHintText.Text = "Ready — place your finger again.";
+            NotRecHintIcon.Foreground = Br("#B7F568");
+        }
+    }
+
     // ===== Public state API =====
 
     public void ShowIdle()
     {
         _resetTimer.Stop();
         _deliverTimer.Stop();
+        _scanWatchdog.Stop();
         _deliverAction = null;
         _scanStartedUtc = DateTime.MinValue;
+        ClearHint();
         ShowPanel(IdlePanel);
     }
 
-    /// <summary>A usable fingerprint image was captured; matching is starting.</summary>
+    /// <summary>A usable fingerprint was captured; matching is starting.</summary>
     public void BeginScan()
     {
         _resetTimer.Stop();
         _deliverTimer.Stop();
         _deliverAction = null;
         _scanStartedUtc = DateTime.UtcNow;
+        ClearHint();
 
         ShowPanel(ScanningPanel);
         StartScanAnimations();
+
+        _scanWatchdog.Stop();
+        _scanWatchdog.Start();
     }
 
     public void ShowSuccess(string employeeName, string? detailLine, string eventType, DateTime timestampUtc)
@@ -105,20 +183,26 @@ public partial class KioskView : UserControl
     public void ShowNotRecognized()
         => AfterMinScan(() =>
         {
+            _scanWatchdog.Stop();
             _scanStartedUtc = DateTime.MinValue;
+
+            NotRecHintText.Text = "Lift your finger, then place it again.";
+            NotRecHintIcon.Foreground = Br("#F5821F");
+
             ShowPanel(NotRecognizedPanel);
             StartAmberAnimation();
             StartReset(8, NotRecCountdownRun, null);
+            Play(SystemSounds.Exclamation);
         });
 
     // ===== Rendering =====
 
     private void RenderResult(string name, string? detailLine, string eventType, DateTime timestampUtc, bool alreadyRecorded)
     {
+        _scanWatchdog.Stop();
         _scanStartedUtc = DateTime.MinValue;
         var clockOut = eventType == "CLOCK_OUT";
 
-        // Palette: green for clock-in, blue for clock-out / already-recorded info.
         var green = !clockOut && !alreadyRecorded;
         SuccessHalo.Background = green ? Lin("#0E8A54", "#10B981", "#84CC16") : Lin("#00497E", "#1C6EB4", "#9FCAFF");
         SuccessInner.Background = green ? Lin("#10B981", "#047857") : Lin("#1C6EB4", "#0B4A80");
@@ -134,10 +218,9 @@ public partial class KioskView : UserControl
         StatusLabelText.Foreground = Br(green ? "#B7F568" : "#D2E4FF");
         LedgerIcon.Foreground = Br(green ? "#B7F568" : "#D2E4FF");
 
-        var action = alreadyRecorded
+        StatusLabelText.Text = alreadyRecorded
             ? (clockOut ? "ALREADY CLOCKED OUT" : "ALREADY CLOCKED IN")
             : (clockOut ? "CLOCKED OUT" : "CLOCKED IN");
-        StatusLabelText.Text = action;
         StatusTimeText.Text = $"at {timestampUtc.ToLocalTime().ToString("hh:mm tt", CultureInfo.InvariantCulture)}";
 
         NameHeadlineText.Text = alreadyRecorded ? name : (clockOut ? $"Goodbye, {name}" : $"Welcome, {name}");
@@ -153,6 +236,7 @@ public partial class KioskView : UserControl
 
         ShowPanel(SuccessPanel);
         StartReset(5, SuccessCountdownRun, ResetBarScale);
+        Play(alreadyRecorded ? SystemSounds.Beep : SystemSounds.Asterisk);
     }
 
     private void ShowPanel(UIElement panel)
@@ -162,6 +246,9 @@ public partial class KioskView : UserControl
 
         if (!ReferenceEquals(panel, ScanningPanel)) StopScanAnimations();
         if (!ReferenceEquals(panel, NotRecognizedPanel)) StopAmberAnimation();
+
+        // Gentle fade-in so state changes feel smooth rather than abrupt.
+        panel.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)));
     }
 
     private void AfterMinScan(Action show)
@@ -213,7 +300,15 @@ public partial class KioskView : UserControl
             _countdownRun.Text = $"{_remaining}s";
     }
 
-    // ===== Animations (code-driven so they can be stopped when hidden) =====
+    // ===== Sound =====
+
+    private static void Play(SystemSound sound)
+    {
+        if (!SoundsEnabled) return;
+        try { sound.Play(); } catch { /* audio is a nicety; never break clock-in */ }
+    }
+
+    // ===== Animations =====
 
     private static DoubleAnimation Loop(double from, double to, double seconds, bool autoReverse = false, double beginSeconds = 0)
     {
@@ -285,7 +380,15 @@ public partial class KioskView : UserControl
         AmberWave.BeginAnimation(OpacityProperty, null);
     }
 
-    // ===== Brush helpers =====
+    // ===== Helpers =====
+
+    private static string Initials(string fullName)
+    {
+        var parts = fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return "?";
+        if (parts.Length == 1) return parts[0][0].ToString().ToUpperInvariant();
+        return $"{parts[0][0]}{parts[^1][0]}".ToUpperInvariant();
+    }
 
     private static SolidColorBrush Br(string hex) => (SolidColorBrush)new BrushConverter().ConvertFromString(hex)!;
 

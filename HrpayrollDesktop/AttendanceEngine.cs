@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -17,12 +19,14 @@ public class AttendanceEngine : BackgroundService
     private const int QueueDepthWarningThreshold = 200;
 
     // The reader is polled quickly so a finger is noticed (and lifts are detected) promptly.
-    // The one-touch-one-result logic lives in the adapter, so a fast poll never causes repeat scans.
     private static readonly TimeSpan CapturePollInterval = TimeSpan.FromMilliseconds(200);
 
     // Someone who lifts and scans again within this window sees "already recorded"
     // instead of accidentally flipping CLOCK_IN to CLOCK_OUT.
     private static readonly TimeSpan ScanCooldown = TimeSpan.FromSeconds(30);
+
+    // How often the kiosk refreshes employee names/mappings from the server (also a "device online" heartbeat).
+    private static readonly TimeSpan MappingRefreshInterval = TimeSpan.FromMinutes(5);
 
     private readonly ILogger<AttendanceEngine> _logger;
     private readonly ITerminalAdapter _terminalAdapter;
@@ -30,6 +34,8 @@ public class AttendanceEngine : BackgroundService
     private readonly LocalAttendanceStore _localStore;
     private readonly BackendApiClient _apiClient;
     private readonly AgentSettings _settings;
+
+    private DateTime _lastMappingAttemptUtc = DateTime.MinValue;
 
     public event Action<string, string, DateTime>? MatchOccurred;   // terminalUserId, eventType, timestampUtc
     public event Action<string, string, DateTime>? DuplicateScan;   // terminalUserId, lastEventType, lastTimestampUtc
@@ -42,7 +48,17 @@ public class AttendanceEngine : BackgroundService
 
     public bool DeviceConnected { get; private set; }
 
+    /// <summary>Scans still on their way to the server.</summary>
     public int PendingSyncCount => _queueStore.GetPendingCount();
+
+    /// <summary>Scans the server refused for a business reason (see the rejected list).</summary>
+    public int RejectedSyncCount => _queueStore.GetRejectedCount();
+
+    public DateTime? LastSyncSuccessUtc { get; private set; }
+    public string? LastSyncError { get; private set; }
+
+    /// <summary>Forces the next sync cycle to immediately re-fetch employee mappings from the server.</summary>
+    public void InvalidateMappingCache() => _lastMappingAttemptUtc = DateTime.MinValue;
 
     public AttendanceEngine(
         ILogger<AttendanceEngine> logger,
@@ -118,6 +134,7 @@ public class AttendanceEngine : BackgroundService
         {
             try
             {
+                await RefreshMappingsIfDueAsync(stoppingToken);
                 await SyncPendingAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -168,31 +185,56 @@ public class AttendanceEngine : BackgroundService
         }
     }
 
+    // Pulls "who is who" for this reader so the kiosk can greet people by name without a manager login.
+    private async Task RefreshMappingsIfDueAsync(CancellationToken stoppingToken)
+    {
+        if (DateTime.UtcNow - _lastMappingAttemptUtc < MappingRefreshInterval) return;
+
+        // On failure, try again in ~30s rather than waiting the full interval.
+        _lastMappingAttemptUtc = DateTime.UtcNow - (MappingRefreshInterval - TimeSpan.FromSeconds(30));
+
+        try
+        {
+            var mappings = await _apiClient.GetDeviceMappingsAsync(stoppingToken);
+            if (mappings is null) return;
+
+            var entries = mappings
+                .Where(m => !string.IsNullOrWhiteSpace(m.EmployeeName))
+                .Select(m => new EmployeeDirectoryEntry(
+                    m.TerminalUserId, m.EmployeeId, m.EmployeeName!, m.EmployeeNumber ?? string.Empty,
+                    m.Position, m.BranchName))
+                .ToList();
+
+            if (entries.Count > 0)
+                _localStore.UpsertEmployees(entries);
+
+            _lastMappingAttemptUtc = DateTime.UtcNow;
+            _logger.LogInformation("Refreshed {Count} employee mapping(s) from the server.", entries.Count);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("Mapping refresh skipped: {Reason}", ex.Message);
+        }
+    }
+
     private async Task SyncPendingAsync(CancellationToken stoppingToken)
     {
         var depth = _queueStore.GetPendingCount();
         if (depth >= QueueDepthWarningThreshold)
             _logger.LogWarning("Offline queue depth is {Depth} — this device may have been offline a long time.", depth);
 
-        var pending = _queueStore.GetPending();
-
-        foreach (var queued in pending)
+        foreach (var queued in _queueStore.GetPending())
         {
+            SyncResult result;
+
             try
             {
-                var result = await _apiClient.SyncEventAsync(
+                result = await _apiClient.SyncEventAsync(
                     queued.EventId, queued.TerminalUserId, queued.Timestamp, queued.VerifyMethod, queued.EventType, stoppingToken);
-
-                if (result.Succeeded)
-                {
-                    _queueStore.MarkSynced(queued.Id);
-                    _logger.LogInformation("Synced event {EventId}", queued.EventId);
-                }
-                else
-                {
-                    _queueStore.MarkFailedAttempt(queued.Id, result.Error ?? "unknown error");
-                    _logger.LogWarning("Sync failed for {EventId}, will retry: {Error}", queued.EventId, result.Error);
-                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -200,14 +242,52 @@ public class AttendanceEngine : BackgroundService
             }
             catch (InvalidOperationException ex)
             {
+                // Device credentials not configured yet.
+                LastSyncError = "Device credentials are not configured.";
                 _logger.LogDebug("Sync skipped: {Reason}", ex.Message);
+                return;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                // Offline / server unreachable: scans stay safely queued; stop this cycle, no penalty.
+                LastSyncError = "Can't reach the server — scans are saved and will sync automatically.";
+                _logger.LogInformation("Server unreachable, will retry: {Reason}", ex.Message);
                 return;
             }
             catch (Exception ex)
             {
-                _queueStore.MarkFailedAttempt(queued.Id, ex.Message);
-                _logger.LogWarning(ex, "Unexpected error syncing {EventId}, will retry", queued.EventId);
+                _queueStore.MarkRetry(queued.Id, ex.Message);
+                _logger.LogWarning(ex, "Unexpected error syncing {EventId}, will retry with backoff", queued.EventId);
+                continue;
             }
+
+            if (result.Succeeded)
+            {
+                _queueStore.MarkSynced(queued.Id);
+                LastSyncSuccessUtc = DateTime.UtcNow;
+                LastSyncError = null;
+                _logger.LogInformation("Synced event {EventId}", queued.EventId);
+                continue;
+            }
+
+            if (result.ShouldPauseSync)
+            {
+                LastSyncError = result.StatusCode is 401 or 403
+                    ? "The server rejected this device's credentials. Check the device serial and token."
+                    : "The server is temporarily unavailable — will retry.";
+                _logger.LogWarning("Sync paused ({Status}): {Error}", result.StatusCode, result.Error);
+                return;
+            }
+
+            if (result.IsPermanentRejection)
+            {
+                _queueStore.MarkRejected(queued.Id, result.Error ?? "Rejected by server");
+                _logger.LogWarning("Server rejected {EventId} permanently: {Error}", queued.EventId, result.Error);
+                continue;
+            }
+
+            _queueStore.MarkRetry(queued.Id, result.Error ?? "Unknown error");
+            _logger.LogWarning("Sync failed for {EventId}, will retry with backoff: {Error}", queued.EventId, result.Error);
         }
     }
 }

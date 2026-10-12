@@ -69,6 +69,7 @@ public partial class ConsoleView : UserControl
     private int _layoutMode;
 
     private bool _enrolling;
+    private bool _loadingEmployees;
     private bool _deviceConnected;
     private string? _deviceMessage;
 
@@ -140,6 +141,7 @@ public partial class ConsoleView : UserControl
         SetEnrollState(EnrollUiState.Ready);
         RefreshDeviceInfo();
         _autoRefresh.Start();
+        _engine?.InvalidateMappingCache();
         _ = LoadEmployeesAsync();
     }
 
@@ -328,6 +330,7 @@ public partial class ConsoleView : UserControl
         if (page == "Dashboard") RefreshAttendance();
         if (page == "Attendance") RefreshPageLog();
         if (page == "Device") RefreshDeviceInfo();
+        if (page == "Enroll") { _loadingEmployees = false; _ = LoadEmployeesAsync(); }
     }
 
     private void RequestLock()
@@ -1112,12 +1115,17 @@ public partial class ConsoleView : UserControl
     {
         var session = _session;
         if (session is null || _apiClient is null || _store is null) return;
+        if (_loadingEmployees) return;
 
         if (session.BranchId is null)
         {
             ShowToast("No branch assigned to this account. Contact your administrator.", "error");
             return;
         }
+
+        _loadingEmployees = true;
+        EmployeeCountText.Text = "Loading employees…";
+        EmployeeListBox.ItemsSource = null;
 
         try
         {
@@ -1138,10 +1146,17 @@ public partial class ConsoleView : UserControl
             RefreshAttendance();
             RefreshDeviceInfo();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             if (ReferenceEquals(session, _session))
+            {
+                EmployeeCountText.Text = "Failed to load employees — check connection";
                 ShowToast("Couldn't load employees. Check the internet connection.", "error");
+            }
+        }
+        finally
+        {
+            _loadingEmployees = false;
         }
     }
 

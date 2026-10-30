@@ -1,6 +1,7 @@
-﻿<UserControl x:Class="HrpayrollDesktop.ConsoleView"
+<UserControl x:Class="HrpayrollDesktop.ConsoleView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:HrpayrollDesktop"
              TextElement.FontFamily="{StaticResource AppFont}"
              Background="#F2F6F7"
              SizeChanged="Root_SizeChanged">
@@ -368,7 +369,7 @@
                             </Border>
                             <StackPanel x:Name="BrandTextGroup" Margin="12,0,0,0" VerticalAlignment="Center">
                                 <TextBlock Text="Dhwarsh HR" Foreground="White" FontSize="16" FontWeight="Bold"/>
-                                <TextBlock Text="Branch console" Foreground="#9FC1BB" FontSize="11"/>
+                                <TextBlock Text="Back Office console" Foreground="#9FC1BB" FontSize="11"/>
                             </StackPanel>
                         </StackPanel>
                     </Button>
@@ -390,6 +391,18 @@
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xE928;" FontFamily="{StaticResource IconFont}" FontSize="18" Width="22"/>
                                 <TextBlock x:Name="NavEnrollLabel" Text="Enroll Employee" Margin="14,0,0,0"/>
+                            </StackPanel>
+                        </ToggleButton>
+                        <ToggleButton x:Name="NavDaysWorked" Tag="DaysWorked" Style="{StaticResource CNavBtn}" Click="Nav_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE787;" FontFamily="{StaticResource IconFont}" FontSize="18" Width="22"/>
+                                <TextBlock x:Name="NavDaysWorkedLabel" Text="Days worked" Margin="14,0,0,0"/>
+                            </StackPanel>
+                        </ToggleButton>
+                        <ToggleButton x:Name="NavDamages" Tag="Damages" Style="{StaticResource CNavBtn}" Click="Nav_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE7BA;" FontFamily="{StaticResource IconFont}" FontSize="18" Width="22"/>
+                                <TextBlock x:Name="NavDamagesLabel" Text="Damages" Margin="14,0,0,0"/>
                             </StackPanel>
                         </ToggleButton>
                         <ToggleButton x:Name="NavDevice" Tag="Device" Style="{StaticResource CNavBtn}" Click="Nav_Click">
@@ -879,6 +892,10 @@
                             </Border>
                         </StackPanel>
 
+                        <!-- ============ DAMAGES ============ -->
+                        <local:DaysWorkedView x:Name="DaysWorkedPage" Visibility="Collapsed" MaxWidth="1040" HorizontalAlignment="Center"/>
+                        <local:DamagesView x:Name="DamagesPage" Visibility="Collapsed" MaxWidth="1040" HorizontalAlignment="Center"/>
+
                         <!-- ============ HELP ============ -->
                         <StackPanel x:Name="HelpPage" Visibility="Collapsed" MaxWidth="760" HorizontalAlignment="Left">
                             <Border Style="{StaticResource CCard}">
@@ -926,4 +943,4 @@
             <TextBlock x:Name="ToastText" Foreground="White" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Center"/>
         </Border>
     </Grid>
-</UserControl>
+</UserControl>

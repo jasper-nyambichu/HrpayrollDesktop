@@ -46,6 +46,9 @@ public class AttendanceEngine : BackgroundService
     public event Action<string>? DeviceFault;
     public event Action? DeviceReady;
 
+    // Back Office consent capture: while armed, the next matched finger answers a damage instead of clocking in/out.
+    public event Action<ConsentScan>? ConsentScanned;
+
     public bool DeviceConnected { get; private set; }
 
     /// <summary>Scans still on their way to the server.</summary>
@@ -59,6 +62,38 @@ public class AttendanceEngine : BackgroundService
 
     /// <summary>Forces the next sync cycle to immediately re-fetch employee mappings from the server.</summary>
     public void InvalidateMappingCache() => _lastMappingAttemptUtc = DateTime.MinValue;
+
+    private readonly object _consentLock = new();
+    private long? _consentDamageId;
+    private string? _consentTerminalUserId;
+
+    /// <summary>True while the reader is waiting for an employee to agree to a damage.</summary>
+    public bool IsConsentCaptureActive
+    {
+        get { lock (_consentLock) return _consentDamageId is not null; }
+    }
+
+    /// <summary>
+    /// Arms the reader for one damage. Until a matching scan arrives (or the capture is cancelled) scans are NOT
+    /// recorded as clock-ins/outs, so agreeing to a damage can never clock anyone in by accident.
+    /// </summary>
+    public void BeginConsentCapture(long damageId, string expectedTerminalUserId)
+    {
+        lock (_consentLock)
+        {
+            _consentDamageId = damageId;
+            _consentTerminalUserId = expectedTerminalUserId;
+        }
+    }
+
+    public void CancelConsentCapture()
+    {
+        lock (_consentLock)
+        {
+            _consentDamageId = null;
+            _consentTerminalUserId = null;
+        }
+    }
 
     public AttendanceEngine(
         ILogger<AttendanceEngine> logger,
@@ -156,6 +191,9 @@ public class AttendanceEngine : BackgroundService
 
         foreach (var evt in events)
         {
+            // A Back Office consent capture is waiting: this scan answers the damage, not attendance.
+            if (TryTakeConsentScan(evt)) continue;
+
             var last = _localStore.GetLastEventToday(evt.TerminalUserId);
 
             // Every touch gets exactly one visible outcome: success, already-recorded, or not-recognized.
@@ -183,6 +221,40 @@ public class AttendanceEngine : BackgroundService
 
             MatchOccurred?.Invoke(evt.TerminalUserId, eventType, evt.Timestamp);
         }
+    }
+
+    // Returns true when a consent capture was armed and the scan was handed to it.
+    private bool TryTakeConsentScan(TerminalEvent evt)
+    {
+        long damageId;
+        string expected;
+
+        lock (_consentLock)
+        {
+            if (_consentDamageId is null || _consentTerminalUserId is null) return false;
+
+            damageId = _consentDamageId.Value;
+            expected = _consentTerminalUserId;
+
+            // The right person ends the capture; someone else's finger leaves it armed for another try.
+            if (evt.TerminalUserId == expected)
+            {
+                _consentDamageId = null;
+                _consentTerminalUserId = null;
+            }
+        }
+
+        try
+        {
+            ConsentScanned?.Invoke(new ConsentScan(
+                damageId, expected, evt.TerminalUserId, evt.TerminalUserId == expected, evt.EventId, evt.Timestamp));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "A consent handler threw; ignoring.");
+        }
+
+        return true;
     }
 
     // Pulls "who is who" for this reader so the kiosk can greet people by name without a manager login.
@@ -291,3 +363,12 @@ public class AttendanceEngine : BackgroundService
         }
     }
 }
+
+/// <summary>One scan taken while a damage was waiting for the employee's consent.</summary>
+public sealed record ConsentScan(
+    long DamageId,
+    string ExpectedTerminalUserId,
+    string MatchedTerminalUserId,
+    bool IsExpectedPerson,
+    string EventId,
+    DateTime TimestampUtc);

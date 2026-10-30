@@ -14,6 +14,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
+using HrpayrollDesktop.Auth;
 
 namespace HrpayrollDesktop;
 
@@ -61,19 +62,34 @@ public partial class App : System.Windows.Application
 
         var apiClient = _host.Services.GetRequiredService<BackendApiClient>();
 
-        // TEMPORARY: config-file credentials until the DPAPI device setup is wired in.
-        var deviceConfig = _host.Services.GetRequiredService<IConfiguration>().GetSection("Device");
-        var deviceSerial = deviceConfig["DeviceSerial"];
-        var deviceToken = deviceConfig["DeviceToken"];
-
-        if (!string.IsNullOrWhiteSpace(deviceSerial) && !string.IsNullOrWhiteSpace(deviceToken))
+        // Device identity: the credentials saved on THIS PC win. appsettings.json is only a fallback for
+        // older installs, so each branch PC keeps its own reader identity.
+        var saved = DeviceCredentialStore.TryLoad();
+        if (saved is not null)
         {
-            apiClient.ConfigureDeviceCredentials(deviceSerial, deviceToken);
+            apiClient.ConfigureDeviceCredentials(saved.DeviceSerial, saved.DeviceToken);
+        }
+        else
+        {
+            var deviceConfig = _host.Services.GetRequiredService<IConfiguration>().GetSection("Device");
+            var deviceSerial = deviceConfig["DeviceSerial"];
+            var deviceToken = deviceConfig["DeviceToken"];
+
+            if (!string.IsNullOrWhiteSpace(deviceSerial) && !string.IsNullOrWhiteSpace(deviceToken))
+            {
+                apiClient.ConfigureDeviceCredentials(deviceSerial, deviceToken);
+            }
         }
 
         var engine = _host.Services.GetRequiredService<AttendanceEngine>();
         var terminalAdapter = _host.Services.GetRequiredService<ITerminalAdapter>();
         var localStore = _host.Services.GetRequiredService<LocalAttendanceStore>();
+        // First run: once the reader is open (so its serial is known), offer to register it.
+        engine.DeviceReady += () => Dispatcher.InvokeAsync(() =>
+        {
+            if (apiClient.Identity is not null) return;
+            new DeviceSetupWindow(terminalAdapter, apiClient) { Owner = MainWindow }.ShowDialog();
+        });
         localStore.Initialize(); // idempotent; guarantees tables exist before any window reads them
 
         // No login gate: the kiosk is the default screen and capture runs all day.

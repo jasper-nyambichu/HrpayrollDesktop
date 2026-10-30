@@ -23,7 +23,18 @@ public static class FriendlyMessages
             var t when t.Contains("not active") => "This employee's account is not active.",
             var t when t.Contains("Device not registered") => "This device isn't registered yet. Contact your administrator.",
             var t when t.Contains("Invalid credentials") => "Incorrect username or password.",
-            var t when t.Contains("locked") => "This account is temporarily locked due to repeated failed logins.",
+            var t when t.Contains("does not belong to the employee") => "That fingerprint belongs to someone else. Ask the right employee to place their finger.",
+            var t when t.Contains("not awaiting consent") => "This damage is no longer waiting for consent. Refresh the list.",
+            var t when t.Contains("Only a damage awaiting consent") => "This damage is no longer waiting for consent. Refresh the list.",
+            var t when t.Contains("Unknown terminal user") => "This employee's fingerprint isn't registered on this reader. Enroll them first, or use Override.",
+            var t when t.Contains("Damage not found") => "That damage could not be found. Refresh the list.",
+            var t when t.Contains("already been deducted") => "This damage has already been deducted from pay, so it can't be cancelled.",
+            var t when t.Contains("reason is required") => "Give a reason for the override.",
+            var t when t.Contains("Days are already locked") => "The days for this period are already locked. Only an Administrator can reopen them.",
+            var t when t.Contains("No locked days found") => "There are no locked days for this period.",
+            var t when t.Contains("no active employees to lock") => "This branch has no active employees to lock days for.",
+            var t when t.Contains("already registered") || t.Contains("already exists") => "This reader is already registered.",
+            var t when t.Contains("Too many failed attempts") => "This account is temporarily locked due to repeated failed logins.",
             _ => text
         };
     }

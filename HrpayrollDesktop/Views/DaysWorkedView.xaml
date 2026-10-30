@@ -1,0 +1,222 @@
+<UserControl x:Class="HrpayrollDesktop.DaysWorkedView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             TextElement.FontFamily="{StaticResource AppFont}">
+
+    <UserControl.Resources>
+        <SolidColorBrush x:Key="WTeal" Color="#0F6B63"/>
+        <SolidColorBrush x:Key="WInk" Color="#10302D"/>
+        <SolidColorBrush x:Key="WMuted" Color="#7C8B8A"/>
+        <SolidColorBrush x:Key="WLine" Color="#E6EDEF"/>
+
+        <Style x:Key="WCard" TargetType="Border">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="{StaticResource WLine}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Padding" Value="20"/>
+            <Setter Property="Margin" Value="8"/>
+        </Style>
+        <Style x:Key="WTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="{StaticResource WInk}"/>
+        </Style>
+        <Style x:Key="WSub" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Foreground" Value="{StaticResource WMuted}"/>
+        </Style>
+        <Style x:Key="WHead" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="{StaticResource WMuted}"/>
+        </Style>
+
+        <Style x:Key="WGhostBtn" TargetType="Button">
+            <Setter Property="Foreground" Value="{StaticResource WInk}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="White" BorderBrush="{StaticResource WLine}" BorderThickness="1"
+                                CornerRadius="10" Padding="13,8">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#F3F8F8"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="WPrimaryBtn" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{StaticResource WTeal}" CornerRadius="12" Padding="22,11">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#0B5750"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Borderless text box (the surrounding Border supplies the look) -->
+        <Style x:Key="WInputBox" TargetType="TextBox">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="{StaticResource WInk}"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <ScrollViewer x:Name="PART_ContentHost" Focusable="False"
+                                      HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <DataTemplate x:Key="DaysRowTemplate">
+            <Border BorderBrush="#EEF3F4" BorderThickness="0,0,0,1" Padding="0,8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="3*"/>
+                        <ColumnDefinition Width="110"/>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="4*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Name}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource WInk}"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding Number}" Style="{StaticResource WSub}" FontSize="10"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Column="1" Text="{Binding SystemDays}" FontSize="13" Foreground="{StaticResource WMuted}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+                    <Border Grid.Column="2" Width="84" Height="34" CornerRadius="8" HorizontalAlignment="Center"
+                            Background="{Binding DaysBackground}" Padding="8,0">
+                        <TextBox Text="{Binding DaysText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 IsEnabled="{Binding Editable}" Style="{StaticResource WInputBox}" TextAlignment="Center"
+                                 MaxLength="3"/>
+                    </Border>
+
+                    <Grid Grid.Column="3" Margin="12,0,0,0" VerticalAlignment="Center">
+                        <Border Visibility="{Binding ReasonVisibility}" Background="#F1F5F6" CornerRadius="8" Height="34" Padding="10,0">
+                            <TextBox Text="{Binding Reason, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource WInputBox}" MaxLength="500"/>
+                        </Border>
+                        <TextBlock Text="{Binding Note}" Style="{StaticResource WSub}" TextWrapping="Wrap"
+                                   VerticalAlignment="Center"/>
+                    </Grid>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <StackPanel>
+
+        <!-- ================= HEADER ================= -->
+        <Border Style="{StaticResource WCard}">
+            <StackPanel>
+                <TextBlock Text="Days worked" FontSize="20" FontWeight="Bold" Foreground="{StaticResource WInk}"/>
+                <TextBlock Text="Review each employee's days for the pay period, correct any with a reason, then lock them. Payroll only uses locked figures."
+                           Style="{StaticResource WSub}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- ================= PERIOD ================= -->
+        <Border Style="{StaticResource WCard}">
+            <StackPanel Orientation="Horizontal">
+                <StackPanel Margin="0,0,14,0">
+                    <TextBlock Text="FROM" Style="{StaticResource WHead}" Margin="0,0,0,4"/>
+                    <DatePicker x:Name="FromPicker" Width="150" Height="34" VerticalContentAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Margin="0,0,14,0">
+                    <TextBlock Text="TO" Style="{StaticResource WHead}" Margin="0,0,0,4"/>
+                    <DatePicker x:Name="ToPicker" Width="150" Height="34" VerticalContentAlignment="Center"/>
+                </StackPanel>
+                <Button x:Name="ShowButton" Style="{StaticResource WPrimaryBtn}" Content="Show" VerticalAlignment="Bottom"
+                        Click="ShowButton_Click"/>
+                <TextBlock x:Name="PeriodErrorText" Foreground="#C2410C" FontSize="12" VerticalAlignment="Bottom"
+                           Margin="14,0,0,8" Visibility="Collapsed" TextWrapping="Wrap" MaxWidth="360"/>
+            </StackPanel>
+        </Border>
+
+        <!-- ================= TABLE ================= -->
+        <Border Style="{StaticResource WCard}" Padding="24">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock x:Name="TableTitleText" Text="Employees" Style="{StaticResource WTitle}"/>
+                        <TextBlock x:Name="TableSubText" Style="{StaticResource WSub}" Margin="0,2,0,0"/>
+                    </StackPanel>
+                    <Border x:Name="LockedPill" Grid.Column="1" Background="#DCFCE7" CornerRadius="10" Padding="12,5"
+                            Visibility="Collapsed" VerticalAlignment="Center">
+                        <TextBlock Text="Locked" FontSize="11" FontWeight="Bold" Foreground="#15803D"/>
+                    </Border>
+                </Grid>
+
+                <TextBlock x:Name="EmptyText" Text="Choose the pay period and press Show." Style="{StaticResource WSub}"
+                           FontSize="12" Margin="0,16,0,0"/>
+
+                <StackPanel x:Name="TablePanel" Visibility="Collapsed" Margin="0,16,0,0">
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="3*"/>
+                            <ColumnDefinition Width="110"/>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="4*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="EMPLOYEE" Style="{StaticResource WHead}"/>
+                        <TextBlock Grid.Column="1" Text="FROM ATTENDANCE" Style="{StaticResource WHead}" HorizontalAlignment="Center"/>
+                        <TextBlock Grid.Column="2" Text="DAYS WORKED" Style="{StaticResource WHead}" HorizontalAlignment="Center"/>
+                        <TextBlock Grid.Column="3" Text="REASON FOR CHANGE" Style="{StaticResource WHead}" Margin="12,0,0,0"/>
+                    </Grid>
+
+                    <ItemsControl x:Name="RowsControl" ItemTemplate="{StaticResource DaysRowTemplate}"/>
+
+                    <Grid Margin="0,18,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock x:Name="TotalText" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource WInk}"/>
+                            <TextBlock x:Name="HintText" Style="{StaticResource WSub}" TextWrapping="Wrap" Margin="0,3,16,0"/>
+                        </StackPanel>
+                        <Button x:Name="LockButton" Grid.Column="1" Style="{StaticResource WPrimaryBtn}" Content="Lock days for payroll"
+                                Click="LockButton_Click"/>
+                    </Grid>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</UserControl>

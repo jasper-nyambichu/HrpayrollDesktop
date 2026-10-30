@@ -1,4 +1,4 @@
-﻿using HrpayrollDesktop.Auth;
+using HrpayrollDesktop.Auth;
 using HrpayrollDesktop.Sync;
 using System;
 using System.Net.Http;
@@ -68,9 +68,9 @@ public partial class LoginView : UserControl
                 return;
             }
 
-            if (result.Session.Role != "BRANCH_MANAGER")
+            if (result.Session.Role != "BACK_OFFICE")
             {
-                ShowError("This device is for Branch Manager login only.");
+                ShowError("This device is for Back Office login only.");
                 return;
             }
 
@@ -125,4 +125,4 @@ public partial class LoginView : UserControl
         StatusText.Text = message ?? string.Empty;
         StatusText.Visibility = string.IsNullOrEmpty(message) ? Visibility.Collapsed : Visibility.Visible;
     }
-}
+}

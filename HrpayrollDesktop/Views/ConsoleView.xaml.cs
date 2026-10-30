@@ -1,4 +1,4 @@
-﻿using HrpayrollDesktop.Auth;
+using HrpayrollDesktop.Auth;
 using HrpayrollDesktop.Local;
 using HrpayrollDesktop.Sync;
 using HrpayrollDesktop.Terminal;
@@ -59,6 +59,7 @@ public partial class ConsoleView : UserControl
     private BackendApiClient? _apiClient;
     private LocalAttendanceStore? _store;
     private AuthResponse? _session;
+    private long? _activeBranchId;   // the branch this terminal is serving for the current sign-in
 
     private readonly bool _initialized;
     private readonly DispatcherTimer _autoRefresh;
@@ -90,7 +91,7 @@ public partial class ConsoleView : UserControl
     public event Action<MouseButtonEventArgs>? HeaderDragRequested;
 
     /// <summary>True while a fingerprint enrollment is in progress (blocks the idle auto-lock).</summary>
-    public bool IsBusy => _enrolling;
+    public bool IsBusy => _enrolling || DamagesPage.IsBusy || DaysWorkedPage.IsBusy;
 
     public ConsoleView()
     {
@@ -114,6 +115,12 @@ public partial class ConsoleView : UserControl
         _adapter = adapter;
         _apiClient = apiClient;
         _store = store;
+
+        DamagesPage.Initialize(engine, adapter, apiClient, store);
+        DamagesPage.Notify += ShowToast;
+
+        DaysWorkedPage.Initialize(apiClient);
+        DaysWorkedPage.Notify += ShowToast;
     }
 
     // ===================================================================
@@ -123,6 +130,9 @@ public partial class ConsoleView : UserControl
     public void StartSession(AuthResponse session)
     {
         _session = session;
+        _activeBranchId = null;
+        DamagesPage.StartSession(session);
+        DaysWorkedPage.StartSession(session);
         ApplySessionToUi();
         ApplyDeviceState();
 
@@ -148,7 +158,10 @@ public partial class ConsoleView : UserControl
     public void EndSession()
     {
         _autoRefresh.Stop();
+        DamagesPage.EndSession();
+        DaysWorkedPage.EndSession();
         _session = null;
+        _activeBranchId = null;
         EmployeeListBox.ItemsSource = null;
         _employeeSummaries = new List<EmployeeSummary>();
         _selectedEmployeeId = null;
@@ -161,10 +174,10 @@ public partial class ConsoleView : UserControl
     {
         if (_session is null) return;
 
-        var name = string.IsNullOrWhiteSpace(_session.DisplayName) ? "Branch Manager" : _session.DisplayName;
+        var name = string.IsNullOrWhiteSpace(_session.DisplayName) ? "Back Office" : _session.DisplayName;
         HeaderNameText.Text = name;
         HeaderAvatarText.Text = Initials(name);
-        HeaderSubText.Text = $"Branch Manager  •  {DateTime.Now.ToString("dddd, d MMMM yyyy")}";
+        HeaderSubText.Text = $"Back Office  •  {DateTime.Now.ToString("dddd, d MMMM yyyy")}";
     }
 
     // ===================================================================
@@ -243,6 +256,8 @@ public partial class ConsoleView : UserControl
         NavDashboardLabel.Visibility = v;
         NavAttendanceLabel.Visibility = v;
         NavEnrollLabel.Visibility = v;
+        NavDaysWorkedLabel.Visibility = v;
+        NavDamagesLabel.Visibility = v;
         NavDeviceLabel.Visibility = v;
         NavHelpLabel.Visibility = v;
         NavSignOutLabel.Visibility = v;
@@ -318,12 +333,16 @@ public partial class ConsoleView : UserControl
         NavDashboard.IsChecked = page == "Dashboard";
         NavAttendance.IsChecked = page == "Attendance";
         NavEnroll.IsChecked = page == "Enroll";
+        NavDaysWorked.IsChecked = page == "DaysWorked";
+        NavDamages.IsChecked = page == "Damages";
         NavDevice.IsChecked = page == "Device";
         NavHelp.IsChecked = page == "Help";
 
         DashboardPage.Visibility = page == "Dashboard" ? Visibility.Visible : Visibility.Collapsed;
         AttendancePage.Visibility = page == "Attendance" ? Visibility.Visible : Visibility.Collapsed;
         EnrollPage.Visibility = page == "Enroll" ? Visibility.Visible : Visibility.Collapsed;
+        DaysWorkedPage.Visibility = page == "DaysWorked" ? Visibility.Visible : Visibility.Collapsed;
+        DamagesPage.Visibility = page == "Damages" ? Visibility.Visible : Visibility.Collapsed;
         DevicePage.Visibility = page == "Device" ? Visibility.Visible : Visibility.Collapsed;
         HelpPage.Visibility = page == "Help" ? Visibility.Visible : Visibility.Collapsed;
 
@@ -331,11 +350,13 @@ public partial class ConsoleView : UserControl
         if (page == "Attendance") RefreshPageLog();
         if (page == "Device") RefreshDeviceInfo();
         if (page == "Enroll") { _loadingEmployees = false; _ = LoadEmployeesAsync(); }
+        if (page == "DaysWorked") _ = OpenBranchPageAsync(DaysWorkedPage.RefreshAsync);
+        if (page == "Damages") _ = OpenBranchPageAsync(DamagesPage.RefreshAsync);
     }
 
     private void RequestLock()
     {
-        if (_enrolling)
+        if (IsBusy)
         {
             ShowToast("Please wait for the fingerprint capture to finish.", "warning");
             return;
@@ -1117,11 +1138,24 @@ public partial class ConsoleView : UserControl
         if (session is null || _apiClient is null || _store is null) return;
         if (_loadingEmployees) return;
 
-        if (session.BranchId is null)
+        // A Back Office account works across branches, so it may not be tied to one. Use the assigned
+        // branch if there is one; otherwise ask once per sign-in which branch this terminal is serving.
+        if (_activeBranchId is null)
         {
-            ShowToast("No branch assigned to this account. Contact your administrator.", "error");
-            return;
+            _activeBranchId = session.BranchId ?? await ResolveBranchAsync(session);
+
+            if (!ReferenceEquals(session, _session)) return;   // signed out while choosing
+
+            if (_activeBranchId is null)
+            {
+                ShowToast("Choose a branch to load its employees.", "warning");
+                return;
+            }
         }
+
+        var branchId = _activeBranchId.Value;
+        DamagesPage.SetBranch(branchId);
+        DaysWorkedPage.SetBranch(branchId);
 
         _loadingEmployees = true;
         EmployeeCountText.Text = "Loading employees…";
@@ -1129,7 +1163,7 @@ public partial class ConsoleView : UserControl
 
         try
         {
-            var employees = await _apiClient.GetEmployeesByBranchAsync(session.BranchId.Value, session.AccessToken, CancellationToken.None);
+            var employees = await _apiClient.GetEmployeesByBranchAsync(branchId, session.AccessToken, CancellationToken.None);
 
             if (!ReferenceEquals(session, _session)) return;   // signed out while loading
 
@@ -1138,6 +1172,7 @@ public partial class ConsoleView : UserControl
                 $"emp-{e.Id}", e.Id, e.FullName, e.EmployeeNumber, e.Position, e.BranchName)));
 
             _employeeSummaries = employees;
+            DamagesPage.SetEmployees(employees);
             ApplyPickerFilter();
 
             if (employees.Count == 0)
@@ -1157,6 +1192,59 @@ public partial class ConsoleView : UserControl
         finally
         {
             _loadingEmployees = false;
+        }
+    }
+
+    // Pages that depend on the branch: make sure it has been chosen (asks once per sign-in), then load.
+    private async Task OpenBranchPageAsync(Func<Task> refresh)
+    {
+        if (_activeBranchId is null)
+        {
+            _loadingEmployees = false;
+            await LoadEmployeesAsync();
+        }
+
+        if (_activeBranchId is not null)
+            await refresh();
+    }
+
+    // Back Office sign-in without an assigned branch: one active branch is used straight away, several
+    // are offered in a small picker. Returns null when nothing was chosen.
+    private async Task<long?> ResolveBranchAsync(AuthResponse session)
+    {
+        if (_apiClient is null) return null;
+
+        try
+        {
+            var all = await _apiClient.GetBranchesAsync(session.AccessToken, CancellationToken.None);
+            if (!ReferenceEquals(session, _session)) return null;
+
+            if (all is null)
+            {
+                ShowToast("Couldn't load the branches. Check the internet connection.", "error");
+                return null;
+            }
+
+            var branches = all
+                .Where(b => !string.Equals(b.Status, "INACTIVE", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (branches.Count == 0)
+            {
+                ShowToast("No branches were found. Contact your administrator.", "error");
+                return null;
+            }
+
+            if (branches.Count == 1) return branches[0].Id;
+
+            var picker = new BranchPickerWindow(branches) { Owner = Window.GetWindow(this) };
+            return picker.ShowDialog() == true ? picker.Selected?.Id : null;
+        }
+        catch (Exception)
+        {
+            ShowToast("Couldn't load the branches. Check the internet connection.", "error");
+            return null;
         }
     }
 

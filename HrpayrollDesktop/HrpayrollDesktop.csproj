@@ -24,26 +24,16 @@
     </None>
   </ItemGroup>
 
+  <!-- SecuGen SDK files live inside the project (Libs\SecuGen\x64), so no machine-specific path is needed. -->
   <ItemGroup>
     <Reference Include="SecuGen.FDxSDKPro.Windows">
-      <HintPath>C:\Users\Tuinuane_CEO\Desktop\FDx_SDK_Pro_Windows_v4.3.1_J1.21\FDx SDK Pro for Windows v4.3.1\DotNETFramework\Bin\x64\SecuGen.FDxSDKPro.Windows.dll</HintPath>
+      <HintPath>Libs\SecuGen\x64\SecuGen.FDxSDKPro.Windows.dll</HintPath>
     </Reference>
   </ItemGroup>
 
-  <ItemGroup>
-    <None Include="C:\Users\Tuinuane_CEO\Desktop\FDx_SDK_Pro_Windows_v4.3.1_J1.21\FDx SDK Pro for Windows v4.3.1\bin\x64\sgfplib.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="C:\Users\Tuinuane_CEO\Desktop\FDx_SDK_Pro_Windows_v4.3.1_J1.21\FDx SDK Pro for Windows v4.3.1\bin\x64\sgfdusdax64.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="C:\Users\Tuinuane_CEO\Desktop\FDx_SDK_Pro_Windows_v4.3.1_J1.21\FDx SDK Pro for Windows v4.3.1\bin\x64\sgfpamx.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="C:\Users\Tuinuane_CEO\Desktop\FDx_SDK_Pro_Windows_v4.3.1_J1.21\FDx SDK Pro for Windows v4.3.1\bin\x64\sgwsqlib.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="C:\Users\Tuinuane_CEO\Desktop\FDx_SDK_Pro_Windows_v4.3.1_J1.21\FDx SDK Pro for Windows v4.3.1\bin\x64\sgbledev.dll">
+    <ItemGroup>
+    <None Include="Libs\SecuGen\x64\*.dll" Exclude="Libs\SecuGen\x64\SecuGen.FDxSDKPro.Windows.dll">
+      <Link>%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

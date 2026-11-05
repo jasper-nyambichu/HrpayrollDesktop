@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -25,8 +26,12 @@ public class AttendanceEngine : BackgroundService
     // instead of accidentally flipping CLOCK_IN to CLOCK_OUT.
     private static readonly TimeSpan ScanCooldown = TimeSpan.FromSeconds(30);
 
-    // How often the kiosk refreshes employee names/mappings from the server (also a "device online" heartbeat).
-    private static readonly TimeSpan MappingRefreshInterval = TimeSpan.FromMinutes(5);
+    // Time allowed for lunch. The server applies the same limit when it records who came back late.
+    public static readonly TimeSpan LunchAllowance = TimeSpan.FromMinutes(30);
+
+    // How often the kiosk refreshes employee names, mappings and fingerprints from the server (also a
+    // "device online" heartbeat). This is also the longest someone moved here waits to be recognised.
+    private static readonly TimeSpan MappingRefreshInterval = TimeSpan.FromMinutes(1);
 
     private readonly ILogger<AttendanceEngine> _logger;
     private readonly ITerminalAdapter _terminalAdapter;
@@ -39,6 +44,8 @@ public class AttendanceEngine : BackgroundService
 
     public event Action<string, string, DateTime>? MatchOccurred;   // terminalUserId, eventType, timestampUtc
     public event Action<string, string, DateTime>? DuplicateScan;   // terminalUserId, lastEventType, lastTimestampUtc
+    public event Action<ScanChoiceRequest>? ChoiceRequired;         // someone at work scanned: lunch, temporary check-out or clock out?
+    public event Action<BreakReturn>? ReturnedFromBreak;             // someone out on a break scanned back in
     public event Action? FingerCaptured;
     public event Action? FingerNotRecognized;
     public event Action? FingerRemoved;
@@ -57,11 +64,16 @@ public class AttendanceEngine : BackgroundService
     /// <summary>Scans the server refused for a business reason (see the rejected list).</summary>
     public int RejectedSyncCount => _queueStore.GetRejectedCount();
 
+    public HashSet<string> GetUnsentEventIds() => _queueStore.GetUnsentEventIds();
+
     public DateTime? LastSyncSuccessUtc { get; private set; }
     public string? LastSyncError { get; private set; }
 
     /// <summary>Forces the next sync cycle to immediately re-fetch employee mappings from the server.</summary>
     public void InvalidateMappingCache() => _lastMappingAttemptUtc = DateTime.MinValue;
+
+    private readonly object _choiceLock = new();
+    private TerminalEvent? _pendingChoice;
 
     private readonly object _consentLock = new();
     private long? _consentDamageId;
@@ -194,6 +206,12 @@ public class AttendanceEngine : BackgroundService
             // A Back Office consent capture is waiting: this scan answers the damage, not attendance.
             if (TryTakeConsentScan(evt)) continue;
 
+            // The last person to scan is still choosing on screen. Nothing else is recorded until they finish.
+            lock (_choiceLock)
+            {
+                if (_pendingChoice is not null) continue;
+            }
+
             var last = _localStore.GetLastEventToday(evt.TerminalUserId);
 
             // Every touch gets exactly one visible outcome: success, already-recorded, or not-recognized.
@@ -203,25 +221,120 @@ public class AttendanceEngine : BackgroundService
                 continue;
             }
 
-            // Toggle is per calendar day: no scan yet today => always CLOCK_IN.
-            var eventType = last?.EventType == "CLOCK_IN" ? "CLOCK_OUT" : "CLOCK_IN";
-
-            _queueStore.Enqueue(new QueuedEvent
-            {
-                EventId = evt.EventId,
-                TerminalUserId = evt.TerminalUserId,
-                Timestamp = evt.Timestamp,
-                VerifyMethod = evt.VerifyMethod,
-                EventType = eventType,
-            });
-
-            _localStore.AppendLog(evt.EventId, evt.TerminalUserId, eventType, evt.Timestamp);
-
-            _logger.LogInformation("Queued event {EventId} ({EventType})", evt.EventId, eventType);
-
-            MatchOccurred?.Invoke(evt.TerminalUserId, eventType, evt.Timestamp);
+            HandleScan(evt, last);
         }
     }
+
+    // What a scan means depends on where the person is: not in yet, at work, or out on a break.
+    private void HandleScan(TerminalEvent evt, AttendanceLogEntry? last)
+    {
+        switch (last?.EventType)
+        {
+            case "CLOCK_IN":
+            case "BREAK_RETURN":
+                lock (_choiceLock)
+                {
+                    _pendingChoice = evt;
+                }
+                ChoiceRequired?.Invoke(new ScanChoiceRequest(evt.TerminalUserId, evt.Timestamp,
+                    _localStore.GetLatestClockInToday(evt.TerminalUserId)?.TimestampUtc));
+                break;
+
+            case "LUNCH_OUT":
+            case "EMERGENCY_OUT":
+                Record(evt, "BREAK_RETURN");
+                ReturnedFromBreak?.Invoke(new BreakReturn(evt.TerminalUserId, last.EventType == "LUNCH_OUT",
+                    last.TimestampUtc, evt.Timestamp, last.ExpectedBackUtc));
+                break;
+
+            default:   // no scan yet today, or they already left and have come back
+                Record(evt, "CLOCK_IN");
+                MatchOccurred?.Invoke(evt.TerminalUserId, "CLOCK_IN", evt.Timestamp);
+                break;
+        }
+    }
+
+    private void Record(TerminalEvent evt, string eventType, DateTime? expectedBackUtc = null, string? reason = null)
+    {
+        _queueStore.Enqueue(new QueuedEvent
+        {
+            EventId = evt.EventId,
+            TerminalUserId = evt.TerminalUserId,
+            Timestamp = evt.Timestamp,
+            VerifyMethod = evt.VerifyMethod,
+            EventType = eventType,
+            ExpectedBackUtc = expectedBackUtc,
+            Reason = reason,
+        });
+
+        _localStore.AppendLog(evt.EventId, evt.TerminalUserId, eventType, evt.Timestamp, expectedBackUtc, reason);
+
+        _logger.LogInformation("Queued event {EventId} ({EventType})", evt.EventId, eventType);
+    }
+
+    /// <summary>Goes to lunch from the moment of the scan. Returns when they are due back, or null if nothing was waiting.</summary>
+    public DateTime? ChooseLunch()
+    {
+        var evt = TakePendingChoice();
+        if (evt is null) return null;
+
+        var due = evt.Timestamp + LunchAllowance;
+        Record(evt, "LUNCH_OUT", due);
+        return due;
+    }
+
+    /// <summary>A temporary check-out, which is never counted as late. Returns false if nothing was waiting.</summary>
+    public bool ChooseTemporaryCheckout(string reason, DateTime expectedBackUtc)
+    {
+        var evt = TakePendingChoice();
+        if (evt is null) return false;
+
+        Record(evt, "EMERGENCY_OUT", expectedBackUtc, reason);
+        return true;
+    }
+
+    /// <summary>Finishes the day. Returns false if nothing was waiting.</summary>
+    public bool ChooseClockOut()
+    {
+        var evt = TakePendingChoice();
+        if (evt is null) return false;
+
+        Record(evt, "CLOCK_OUT");
+        return true;
+    }
+
+    /// <summary>They walked away or pressed cancel, so the scan records nothing.</summary>
+    public void CancelChoice() => TakePendingChoice();
+
+    private TerminalEvent? TakePendingChoice()
+    {
+        lock (_choiceLock)
+        {
+            var evt = _pendingChoice;
+            _pendingChoice = null;
+            return evt;
+        }
+    }
+
+#if DEBUG
+    /// <summary>Test builds only: goes through exactly what a real finger does, without one.</summary>
+    public void SimulateScan(string terminalUserId)
+    {
+        FingerCaptured?.Invoke();
+        var evt = new TerminalEvent($"sim-{Guid.NewGuid():N}", terminalUserId, DateTime.UtcNow, "FINGERPRINT");
+        lock (_choiceLock)
+        {
+            if (_pendingChoice is not null) return;
+        }
+        var last = _localStore.GetLastEventToday(terminalUserId);
+        if (last is not null && (evt.Timestamp - last.TimestampUtc) < ScanCooldown)
+        {
+            DuplicateScan?.Invoke(terminalUserId, last.EventType, last.TimestampUtc);
+            return;
+        }
+        HandleScan(evt, last);
+    }
+#endif
 
     // Returns true when a consent capture was armed and the scan was handed to it.
     private bool TryTakeConsentScan(TerminalEvent evt)
@@ -282,6 +395,8 @@ public class AttendanceEngine : BackgroundService
 
             _lastMappingAttemptUtc = DateTime.UtcNow;
             _logger.LogInformation("Refreshed {Count} employee mapping(s) from the server.", entries.Count);
+
+            await SyncFingerprintsNowAsync(stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -291,6 +406,41 @@ public class AttendanceEngine : BackgroundService
         {
             _logger.LogDebug("Mapping refresh skipped: {Reason}", ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Brings this reader in line with who works at its branch now: someone moved here is added, and someone
+    /// moved away is removed. Returns false when the server couldn't be asked or the reader isn't open.
+    /// </summary>
+    public async Task<bool> SyncFingerprintsNowAsync(CancellationToken cancellationToken)
+    {
+        if (!DeviceConnected) return false;   // the local templates are only loaded once the reader is open
+
+        var bundle = await _apiClient.GetFingerprintsAsync(cancellationToken);
+        if (bundle is null) return false;
+
+        var fingerprints = new List<ServerFingerprint>();
+        foreach (var person in bundle.Templates.OrderBy(t => t.FingerSlot).GroupBy(t => t.TerminalUserId))
+        {
+            var first = person.First();   // the reader holds one finger per person
+            try
+            {
+                fingerprints.Add(new ServerFingerprint(first.TerminalUserId, first.EmployeeId, Convert.FromBase64String(first.TemplateData)));
+            }
+            catch (FormatException)
+            {
+                _logger.LogWarning("Skipped an unreadable fingerprint for employee {EmployeeId}.", first.EmployeeId);
+            }
+        }
+
+        var summary = await _terminalAdapter.ApplyServerFingerprintsAsync(fingerprints, bundle.EmployeeIds, cancellationToken);
+        _localStore.RemoveEmployeesNotIn(bundle.EmployeeIds);
+        if (summary.Changed)
+        {
+            _logger.LogInformation("Fingerprints synced: {Added} added, {Updated} updated, {Removed} removed.",
+                summary.Added, summary.Updated, summary.Removed);
+        }
+        return true;
     }
 
     private async Task SyncPendingAsync(CancellationToken stoppingToken)
@@ -306,7 +456,8 @@ public class AttendanceEngine : BackgroundService
             try
             {
                 result = await _apiClient.SyncEventAsync(
-                    queued.EventId, queued.TerminalUserId, queued.Timestamp, queued.VerifyMethod, queued.EventType, stoppingToken);
+                    queued.EventId, queued.TerminalUserId, queued.Timestamp, queued.VerifyMethod, queued.EventType,
+                    queued.ExpectedBackUtc, queued.Reason, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -363,6 +514,12 @@ public class AttendanceEngine : BackgroundService
         }
     }
 }
+
+/// <summary>Someone already at work scanned, so they choose what happens next on screen.</summary>
+public sealed record ScanChoiceRequest(string TerminalUserId, DateTime ScannedAtUtc, DateTime? ClockedInAtUtc);
+
+/// <summary>Someone came back from lunch or a temporary check-out.</summary>
+public sealed record BreakReturn(string TerminalUserId, bool WasLunch, DateTime LeftAtUtc, DateTime BackAtUtc, DateTime? ExpectedBackUtc);
 
 /// <summary>One scan taken while a damage was waiting for the employee's consent.</summary>
 public sealed record ConsentScan(

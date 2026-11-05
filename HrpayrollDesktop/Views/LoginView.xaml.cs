@@ -1,5 +1,6 @@
 using HrpayrollDesktop.Auth;
 using HrpayrollDesktop.Sync;
+using HrpayrollDesktop.Terminal;
 using System;
 using System.Net.Http;
 using System.Threading;
@@ -14,6 +15,7 @@ namespace HrpayrollDesktop;
 public partial class LoginView : UserControl
 {
     private BackendApiClient? _apiClient;
+    private ITerminalAdapter? _adapter;
     private bool _busy;
 
     public event Action<AuthResponse>? LoginSucceeded;
@@ -24,7 +26,11 @@ public partial class LoginView : UserControl
         InitializeComponent();
     }
 
-    public void Initialize(BackendApiClient apiClient) => _apiClient = apiClient;
+    public void Initialize(BackendApiClient apiClient, ITerminalAdapter adapter)
+    {
+        _apiClient = apiClient;
+        _adapter = adapter;
+    }
 
     public void SetTerminalLabel(string text) => TerminalPillText.Text = text;
 
@@ -72,6 +78,37 @@ public partial class LoginView : UserControl
             {
                 ShowError("This device is for Back Office login only.");
                 return;
+            }
+
+            if (result.Session.BranchId is not long branchId)
+            {
+                ShowError("This account isn't assigned to a branch yet. Ask your administrator.");
+                return;
+            }
+
+            // A Back Office works at its own branch only, so it can't use another branch's reader.
+            if (_apiClient.Identity is { } identity)
+            {
+                var readers = await _apiClient.GetDevicesByBranchAsync(branchId, result.Session.AccessToken, CancellationToken.None);
+                if (readers is not null && !readers.Exists(r => string.Equals(r.DeviceSerial, identity.Serial, StringComparison.Ordinal)))
+                {
+                    ShowError("This reader belongs to a different branch. Sign in on your own branch's computer.");
+                    return;
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(_adapter?.DeviceSerial))
+            {
+                // First sign-in on this PC: the reader joins this login's branch. The token is shown only once.
+                var (registration, error) = await _apiClient.RegisterDeviceAsync(
+                    branchId, _adapter.DeviceSerial, result.Session.AccessToken, CancellationToken.None);
+                if (registration is null)
+                {
+                    ShowError(FriendlyMessages.Translate(error));
+                    return;
+                }
+
+                DeviceCredentialStore.Save(new DeviceCredentials(registration.DeviceSerial, registration.PlaintextToken));
+                _apiClient.ConfigureDeviceCredentials(registration.DeviceSerial, registration.PlaintextToken);
             }
 
             PasswordBox.Password = string.Empty;

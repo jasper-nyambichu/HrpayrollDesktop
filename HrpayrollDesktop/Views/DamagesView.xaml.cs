@@ -30,8 +30,8 @@ public partial class DamagesView : UserControl
 
     private static readonly (Brush Bg, Brush Fg)[] AvatarPalette =
     {
-        (Br("#DDF3EF"), Br("#0E7C66")), (Br("#FDEFD2"), Br("#B7791F")), (Br("#E4ECFB"), Br("#2F5FB3")),
-        (Br("#FBE3DD"), Br("#C2512F")), (Br("#EBE4F7"), Br("#6B46C1")), (Br("#E2F0DA"), Br("#3F7D20")),
+        (Br("#D2E4FF"), Br("#2E7D24")), (Br("#FFF4D6"), Br("#8A5F00")), (Br("#E6F0F8"), Br("#005592")),
+        (Br("#FFE3D1"), Br("#B4530F")), (Br("#E6F0F8"), Br("#0B2A45")), (Br("#E5F4E2"), Br("#2E7D24")),
     };
 
     private AttendanceEngine? _engine;
@@ -40,7 +40,6 @@ public partial class DamagesView : UserControl
     private LocalAttendanceStore? _store;
     private AuthResponse? _session;
 
-    private long? _branchId;
     private List<EmployeeSummary> _employees = new();
     private List<DamageItem> _damages = new();
     private DamageItem? _selected;
@@ -101,8 +100,6 @@ public partial class DamagesView : UserControl
         ShowDetail();
     }
 
-    public void SetBranch(long? branchId) => _branchId = branchId;
-
     public void SetEmployees(IEnumerable<EmployeeSummary> employees)
     {
         _employees = employees.OrderBy(e => e.FullName, StringComparer.OrdinalIgnoreCase).ToList();
@@ -135,8 +132,10 @@ public partial class DamagesView : UserControl
                 return;
             }
 
-            // This reader only knows this branch's fingerprints, so only this branch's damages can be agreed here.
-            _damages = _branchId is long branchId ? all.Where(d => d.BranchId == branchId).ToList() : all;
+            // This reader only holds the fingerprints of the people working here now, so those are the damages
+            // that can be agreed here. It includes a damage recorded at their old branch before they moved.
+            var roster = _employees.Select(e => e.Id).ToHashSet();
+            _damages = roster.Count == 0 ? all : all.Where(d => roster.Contains(d.EmployeeId)).ToList();
 
             long? keep = selectNewest
                 ? _damages.OrderByDescending(d => d.Id).FirstOrDefault()?.Id
@@ -241,10 +240,10 @@ public partial class DamagesView : UserControl
         StatusText.Text = text;
         (StatusBox.Background, StatusText.Foreground) = kind switch
         {
-            "success" => (Br("#DCFCE7"), Br("#15803D")),
-            "warning" => (Br("#FFF1DC"), Br("#B45309")),
-            "error" => (Br("#FDE8E4"), Br("#C2410C")),
-            _ => (Br("#F1F6F6"), Br("#10302D")),
+            "success" => (Br("#E5F4E2"), Br("#2E7D24")),
+            "warning" => (Br("#FFF4D6"), Br("#8A5F00")),
+            "error" => (Br("#FFDAD6"), Br("#BA1A1A")),
+            _ => (Br("#F0F4F8"), Br("#171C1F")),
         };
     }
 
@@ -443,11 +442,11 @@ public partial class DamagesView : UserControl
         var damage = _selected;
         var name = damage.EmployeeName ?? $"Employee #{damage.EmployeeId}";
 
-        var answer = System.Windows.MessageBox.Show(
-            Window.GetWindow(this),
-            $"Cancel the {FormatKes(damage.Amount)} damage for {name}?\n\nNothing will be deducted from their pay.",
-            "Cancel damage", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
-        if (answer != MessageBoxResult.Yes) return;
+        if (PopupHost.Current is not { } popups) return;
+        var yes = await popups.ConfirmAsync("Cancel this damage?",
+            $"Cancel the {FormatKes(damage.Amount)} damage for {name}? Nothing will be deducted from their pay.",
+            "Yes, cancel it", dangerous: true);
+        if (!yes) return;
 
         var session = _session;
         var done = false;

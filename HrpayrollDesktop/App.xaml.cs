@@ -46,13 +46,15 @@ public partial class App : System.Windows.Application
 
                 // One shared BackendApiClient (AddHttpClient<T> would register it
                 // transient and each consumer would get an unconfigured copy).
-                services.AddHttpClient("BackendApi");
+                services.AddSingleton<StaffTokenStore>();
+                services.AddTransient<StaffTokenRefreshHandler>();
+                services.AddHttpClient("BackendApi").AddHttpMessageHandler<StaffTokenRefreshHandler>();
                 services.AddSingleton<BackendApiClient>(sp =>
                 {
                     var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient("BackendApi");
                     var settings = sp.GetRequiredService<IOptions<AgentSettings>>();
                     var logger = sp.GetRequiredService<ILogger<BackendApiClient>>();
-                    return new BackendApiClient(httpClient, settings, logger);
+                    return new BackendApiClient(httpClient, settings, logger, sp.GetRequiredService<StaffTokenStore>());
                 });
 
                 services.AddSingleton<AttendanceEngine>();
@@ -62,34 +64,17 @@ public partial class App : System.Windows.Application
 
         var apiClient = _host.Services.GetRequiredService<BackendApiClient>();
 
-        // Device identity: the credentials saved on THIS PC win. appsettings.json is only a fallback for
-        // older installs, so each branch PC keeps its own reader identity.
+        // Device identity: each PC registers its own reader the first time a Back Office signs in, which ties
+        // it to that branch. The app ships with no credentials, or every branch would be the same device.
         var saved = DeviceCredentialStore.TryLoad();
         if (saved is not null)
         {
             apiClient.ConfigureDeviceCredentials(saved.DeviceSerial, saved.DeviceToken);
         }
-        else
-        {
-            var deviceConfig = _host.Services.GetRequiredService<IConfiguration>().GetSection("Device");
-            var deviceSerial = deviceConfig["DeviceSerial"];
-            var deviceToken = deviceConfig["DeviceToken"];
-
-            if (!string.IsNullOrWhiteSpace(deviceSerial) && !string.IsNullOrWhiteSpace(deviceToken))
-            {
-                apiClient.ConfigureDeviceCredentials(deviceSerial, deviceToken);
-            }
-        }
 
         var engine = _host.Services.GetRequiredService<AttendanceEngine>();
         var terminalAdapter = _host.Services.GetRequiredService<ITerminalAdapter>();
         var localStore = _host.Services.GetRequiredService<LocalAttendanceStore>();
-        // First run: once the reader is open (so its serial is known), offer to register it.
-        engine.DeviceReady += () => Dispatcher.InvokeAsync(() =>
-        {
-            if (apiClient.Identity is not null) return;
-            new DeviceSetupWindow(terminalAdapter, apiClient) { Owner = MainWindow }.ShowDialog();
-        });
         localStore.Initialize(); // idempotent; guarantees tables exist before any window reads them
 
         // No login gate: the kiosk is the default screen and capture runs all day.

@@ -1,4 +1,5 @@
-﻿using System;
+using System.Collections.Generic;
+using System;
 using System.Text.Json.Serialization;
 
 namespace HrpayrollDesktop.Auth;
@@ -28,6 +29,21 @@ public record EmployeeSummary(
     string? BranchName,
     string? Position,
     string EmploymentStatus
+);
+
+public record AttendanceDayPage(List<AttendanceDayRecord> Content);
+
+public record AttendanceDayRecord(long EmployeeId, List<AttendanceBreak>? Checkouts);
+
+/// <summary>One lunch break or temporary check-out. ReturnStatus is OUT, ON_TIME, LATE or RETURNED.</summary>
+public record AttendanceBreak(
+    string Type,
+    DateTime CheckedOutAt,
+    DateTime? ExpectedBackAt,
+    DateTime? CheckedInAt,
+    string ReturnStatus,
+    int? MinutesLate,
+    string? Reason
 );
 
 public record AttendanceRecord(

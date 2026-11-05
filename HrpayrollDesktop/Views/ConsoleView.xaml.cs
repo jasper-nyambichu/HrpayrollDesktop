@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,27 +30,38 @@ public partial class ConsoleView : UserControl
 
     private sealed record LogRow(int Number, string UserId, string EmployeeName, string EmployeeNumber, string Subtitle,
         string Initials, Brush AvatarBg, Brush AvatarFg, string ClockIn, string ClockOut, string Hours, string Status,
-        Brush StatusBg, Brush StatusFg, string StatusKey, string Punches, DateTime? FirstKey, DateTime? LastKey);
+        Brush StatusBg, Brush StatusFg, string StatusKey, string Punches, DateTime? FirstKey, DateTime? LastKey,
+        string Breaks, Brush BreaksFg, bool OnBreak, int MinutesLate);
 
     private sealed record LiveCard(string Name, string Position, string Initials, Brush AvatarBg, Brush AvatarFg,
-        string StatusText, Brush StatusBg, Brush StatusFg, string BigValue, string BigLabel, string DateText,
-        Geometry Spark, Brush SparkBrush);
+        string StatusText, Brush StatusBg, Brush StatusFg, string DateText);
+
+    // One lunch break or temporary check-out, in UTC, from the server or from this PC's own scans.
+    private sealed record BreakInfo(bool IsLunch, DateTime LeftUtc, DateTime? DueUtc, DateTime? BackUtc, string? Reason)
+    {
+        public bool IsOut => BackUtc is null;
+
+        // Only a lunch can be late. Rounded up, as the server does, so a few seconds never reads as 0 minutes.
+        public int MinutesLate => IsLunch && BackUtc is { } back && DueUtc is { } due && back > due
+            ? (int)Math.Ceiling((back - due).TotalMinutes) : 0;
+    }
 
     private sealed record ChartBar(string Label, string Tip, int Dark, int Mid, int Light);
 
     // ===== Palette =====
 
-    private static readonly Brush InBg = Br("#DDF5EE"), InFg = Br("#0E7C66");
-    private static readonly Brush OutBg = Br("#E1EDFB"), OutFg = Br("#2563A8");
-    private static readonly Brush AbsBg = Br("#EEF1F2"), AbsFg = Br("#6B7B7A");
-    private static readonly Brush WarnBg = Br("#FFF1DC"), WarnFg = Br("#B45309");
-    private static readonly Brush RedBg = Br("#FDE8E4"), RedFg = Br("#C2410C");
-    private static readonly Brush DarkTeal = Br("#0B4F49"), MidTeal = Br("#2DB7A3"), TrackGray = Br("#E3EAEC"), Gold = Br("#F5B71E");
+    private static readonly Brush InBg = Br("#E5F4E2"), InFg = Br("#2E7D24");
+    private static readonly Brush OutBg = Br("#E6F0F8"), OutFg = Br("#1C6EB4");
+    private static readonly Brush AbsBg = Br("#F0F4F8"), AbsFg = Br("#717782");
+    private static readonly Brush WarnBg = Br("#FFF4D6"), WarnFg = Br("#8A5F00");
+    private static readonly Brush RedBg = Br("#FFDAD6"), RedFg = Br("#BA1A1A");
+    private static readonly Brush InkSoft = Br("#414751");
+    private static readonly Brush DarkTeal = Br("#005592"), MidTeal = Br("#5BA7E6"), TrackGray = Br("#E4EDF4"), Gold = Br("#F2A900");
 
     private static readonly (Brush Bg, Brush Fg)[] AvatarPalette =
     {
-        (Br("#DDF3EF"), Br("#0E7C66")), (Br("#FDEFD2"), Br("#B7791F")), (Br("#E4ECFB"), Br("#2F5FB3")),
-        (Br("#FBE3DD"), Br("#C2512F")), (Br("#EBE4F7"), Br("#6B46C1")), (Br("#E2F0DA"), Br("#3F7D20")),
+        (Br("#D2E4FF"), Br("#2E7D24")), (Br("#FFF4D6"), Br("#8A5F00")), (Br("#E6F0F8"), Br("#005592")),
+        (Br("#FFE3D1"), Br("#B4530F")), (Br("#E6F0F8"), Br("#0B2A45")), (Br("#E5F4E2"), Br("#2E7D24")),
     };
 
     // ===== State =====
@@ -59,7 +71,16 @@ public partial class ConsoleView : UserControl
     private BackendApiClient? _apiClient;
     private LocalAttendanceStore? _store;
     private AuthResponse? _session;
-    private long? _activeBranchId;   // the branch this terminal is serving for the current sign-in
+    private string? _branchName;
+
+    // What the server recorded for this branch, from every reader it has. Null until it has loaded once.
+    private List<AttendanceRecord>? _branchAttendance;
+    private readonly Dictionary<string, string> _branchAttendanceNames = new();
+    private DateTime _activityFrom = DateTime.MaxValue;
+    private readonly Dictionary<DateTime, Dictionary<string, List<BreakInfo>>> _serverBreaks = new();
+    private DateTime _activityFetchedUtc;
+    private bool _loadingActivity;
+    private const int ActivityDays = 30;
 
     private readonly bool _initialized;
     private readonly DispatcherTimer _autoRefresh;
@@ -75,7 +96,6 @@ public partial class ConsoleView : UserControl
     private string? _deviceMessage;
 
     private string _search = string.Empty;
-    private bool _syncingSearch;
     private string _chartMode = "Today";
     private DateTime _pageDate = DateTime.Today;
     private string _pageFilter = "All";
@@ -102,6 +122,7 @@ public partial class ConsoleView : UserControl
         {
             if (_session is null) return;
             RefreshAttendance();
+            _ = LoadBranchActivityAsync();
             if (AttendancePage.Visibility == Visibility.Visible && _pageDate == DateTime.Today) RefreshPageLog();
         };
 
@@ -130,17 +151,15 @@ public partial class ConsoleView : UserControl
     public void StartSession(AuthResponse session)
     {
         _session = session;
-        _activeBranchId = null;
+        _apiClient?.BeginStaffSession(session);
         DamagesPage.StartSession(session);
         DaysWorkedPage.StartSession(session);
+        DaysWorkedPage.SetBranch(session.BranchId);
         ApplySessionToUi();
         ApplyDeviceState();
 
         _search = string.Empty;
-        _syncingSearch = true;
         HeaderSearchBox.Text = string.Empty;
-        HeroSearchBox.Text = string.Empty;
-        _syncingSearch = false;
 
         _pageDate = DateTime.Today;
         _layoutMode = 0;
@@ -153,6 +172,7 @@ public partial class ConsoleView : UserControl
         _autoRefresh.Start();
         _engine?.InvalidateMappingCache();
         _ = LoadEmployeesAsync();
+        _ = BackUpLocalFingerprintsAsync(session);
     }
 
     public void EndSession()
@@ -160,8 +180,12 @@ public partial class ConsoleView : UserControl
         _autoRefresh.Stop();
         DamagesPage.EndSession();
         DaysWorkedPage.EndSession();
+        _apiClient?.EndStaffSession();
         _session = null;
-        _activeBranchId = null;
+        _branchAttendance = null;
+        _branchAttendanceNames.Clear();
+        _serverBreaks.Clear();
+        _activityFrom = DateTime.MaxValue;
         EmployeeListBox.ItemsSource = null;
         _employeeSummaries = new List<EmployeeSummary>();
         _selectedEmployeeId = null;
@@ -177,7 +201,9 @@ public partial class ConsoleView : UserControl
         var name = string.IsNullOrWhiteSpace(_session.DisplayName) ? "Back Office" : _session.DisplayName;
         HeaderNameText.Text = name;
         HeaderAvatarText.Text = Initials(name);
-        HeaderSubText.Text = $"Back Office  •  {DateTime.Now.ToString("dddd, d MMMM yyyy")}";
+        HeaderSubText.Text = _branchName ?? "Back Office";
+        HeroDateText.Text = DateTime.Now.ToString("MMMM d, yyyy  •  dddd", CultureInfo.InvariantCulture);
+        HeroGreetingText.Text = $"Welcome back, {PopupHost.FirstName(name)}!";
     }
 
     // ===================================================================
@@ -193,7 +219,14 @@ public partial class ConsoleView : UserControl
 
     public void NotifyClockEvent(string employeeName, string eventType, DateTime timestampUtc)
     {
-        var action = eventType == "CLOCK_OUT" ? "clocked out" : "clocked in";
+        var action = eventType switch
+        {
+            "CLOCK_OUT" => "clocked out",
+            "LUNCH_OUT" => "went for lunch",
+            "EMERGENCY_OUT" => "checked out temporarily",
+            "BREAK_RETURN" => "came back",
+            _ => "clocked in",
+        };
         ShowToast($"{employeeName} {action} at {timestampUtc.ToLocalTime().ToString("hh:mm tt", CultureInfo.InvariantCulture)}", "success");
         RefreshAttendance();
         if (AttendancePage.Visibility == Visibility.Visible && _pageDate == DateTime.Today) RefreshPageLog();
@@ -204,19 +237,19 @@ public partial class ConsoleView : UserControl
     {
         if (_deviceConnected)
         {
-            DeviceNavDot.Fill = Br("#2DB7A3");
+            DeviceNavDot.Fill = Br("#9CD84F");
             SystemAlertBorder.Visibility = Visibility.Collapsed;
             EnrollSensorText.Text = "Ready";
-            EnrollSensorText.Foreground = Br("#059669");
+            EnrollSensorText.Foreground = Br("#3B9A2F");
         }
         else
         {
             var hasFault = !string.IsNullOrWhiteSpace(_deviceMessage);
-            DeviceNavDot.Fill = Br(hasFault ? "#E5484D" : "#F5821F");
+            DeviceNavDot.Fill = Br(hasFault ? "#BA1A1A" : "#F2A900");
             SystemAlertText.Text = _deviceMessage ?? string.Empty;
             SystemAlertBorder.Visibility = hasFault ? Visibility.Visible : Visibility.Collapsed;
             EnrollSensorText.Text = hasFault ? "Not detected" : "Connecting…";
-            EnrollSensorText.Foreground = Br("#C2410C");
+            EnrollSensorText.Foreground = Br("#BA1A1A");
         }
 
         UpdateEnrollAvailability();
@@ -248,11 +281,13 @@ public partial class ConsoleView : UserControl
     {
         // Auto-collapse on narrow windows, otherwise honour the user's choice.
         var expanded = _userSidebarExpanded && ActualWidth >= 1100;
-        SidebarColumn.Width = new GridLength(expanded ? 248 : 76);
+        SidebarColumn.Width = new GridLength(expanded ? 190 : 72);
+        LogoTile.Width = LogoTile.Height = expanded ? 84 : 44;
+        LogoTile.CornerRadius = new CornerRadius(expanded ? 20 : 12);
+        LogoTile.Padding = new Thickness(expanded ? 9 : 5);
         _sidebarExpanded = expanded;
 
         var v = expanded ? Visibility.Visible : Visibility.Collapsed;
-        BrandTextGroup.Visibility = v;
         NavDashboardLabel.Visibility = v;
         NavAttendanceLabel.Visibility = v;
         NavEnrollLabel.Visibility = v;
@@ -263,53 +298,19 @@ public partial class ConsoleView : UserControl
         NavSignOutLabel.Visibility = v;
     }
 
-    /// <summary>3 columns (wide) → 2 columns (medium) → 1 column (narrow), like a responsive web dashboard.</summary>
+    /// <summary>The design's side column on a wide window. On a narrow one it moves underneath.</summary>
     private void ApplyDashboardLayout()
     {
         if (!_initialized) return;
 
-        var width = ActualWidth - SidebarColumn.Width.Value - 40;
-        var mode = width >= 1120 ? 3 : width >= 760 ? 2 : 1;
+        var mode = ActualWidth - SidebarColumn.Width.Value >= 1000 ? 2 : 1;
         if (mode == _layoutMode) return;
         _layoutMode = mode;
 
-        DashGrid.ColumnDefinitions.Clear();
-        DashGrid.RowDefinitions.Clear();
-
-        var star = new GridLength(1, GridUnitType.Star);
-        void Cols(params GridLength[] c) { foreach (var x in c) DashGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = x }); }
-        void Rows(int n) { for (var i = 0; i < n; i++) DashGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); }
-        void Put(UIElement el, int r, int c, int rs = 1, int cs = 1)
-        {
-            Grid.SetRow(el, r); Grid.SetColumn(el, c); Grid.SetRowSpan(el, rs); Grid.SetColumnSpan(el, cs);
-        }
-
-        switch (mode)
-        {
-            case 3:
-                Cols(new GridLength(332), star, new GridLength(340));
-                Rows(3);
-                Put(HeroCard, 0, 0); Put(PieCard, 0, 1); Put(RingsCard, 0, 2);
-                Put(LiveSection, 1, 0, 2, 1); Put(ChartCard, 1, 1, 1, 2); Put(TableCard, 2, 1, 1, 2);
-                LiveList.ItemsPanel = (ItemsPanelTemplate)FindResource("VPanel");
-                break;
-
-            case 2:
-                Cols(star, star);
-                Rows(5);
-                Put(HeroCard, 0, 0); Put(PieCard, 0, 1); Put(RingsCard, 1, 0, 1, 2);
-                Put(ChartCard, 2, 0, 1, 2); Put(LiveSection, 3, 0, 1, 2); Put(TableCard, 4, 0, 1, 2);
-                LiveList.ItemsPanel = (ItemsPanelTemplate)FindResource("WPanel");
-                break;
-
-            default:
-                Cols(star);
-                Rows(6);
-                Put(HeroCard, 0, 0); Put(PieCard, 1, 0); Put(RingsCard, 2, 0);
-                Put(LiveSection, 3, 0); Put(ChartCard, 4, 0); Put(TableCard, 5, 0);
-                LiveList.ItemsPanel = (ItemsPanelTemplate)FindResource("WPanel");
-                break;
-        }
+        var twoColumns = mode == 2;
+        DashSideColumn.Width = twoColumns ? new GridLength(290) : new GridLength(0);
+        Grid.SetColumn(DashSide, twoColumns ? 1 : 0);
+        Grid.SetRow(DashSide, twoColumns ? 0 : 1);
     }
 
     // ===================================================================
@@ -350,9 +351,14 @@ public partial class ConsoleView : UserControl
         if (page == "Attendance") RefreshPageLog();
         if (page == "Device") RefreshDeviceInfo();
         if (page == "Enroll") { _loadingEmployees = false; _ = LoadEmployeesAsync(); }
-        if (page == "DaysWorked") _ = OpenBranchPageAsync(DaysWorkedPage.RefreshAsync);
-        if (page == "Damages") _ = OpenBranchPageAsync(DamagesPage.RefreshAsync);
+        if (page == "DaysWorked") _ = DaysWorkedPage.RefreshAsync();
+        if (page == "Damages") _ = DamagesPage.RefreshAsync();
     }
+
+#if DEBUG
+    /// <summary>Test builds only: opens a page without a mouse.</summary>
+    internal void TestSelectPage(string page) => SelectPage(page);
+#endif
 
     private void RequestLock()
     {
@@ -377,41 +383,26 @@ public partial class ConsoleView : UserControl
     private void GearHelp_Click(object sender, RoutedEventArgs e) => SelectPage("Help");
     private void GearSignOut_Click(object sender, RoutedEventArgs e) => RequestLock();
 
-    private void GearExit_Click(object sender, RoutedEventArgs e)
+    private async void GearExit_Click(object sender, RoutedEventArgs e)
     {
-        var answer = System.Windows.MessageBox.Show(
-            "Exit the application? Fingerprint clock-in will stop on this computer until it is started again.",
-            "Exit Dhwarsh HR", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (PopupHost.Current is not { } popups) return;
 
-        if (answer == MessageBoxResult.Yes)
-            ExitRequested?.Invoke();
+        var yes = await popups.ConfirmAsync("Exit Dhwarsh HR?",
+            "Fingerprint attendance will stop on this computer until the app is started again.", "Yes, exit", dangerous: true);
+
+        if (yes) ExitRequested?.Invoke();
     }
 
     // ===================================================================
-    //  Search (header + hero stay in sync and filter the time log)
+    //  Search (filters the time log)
     // ===================================================================
 
     private void HeaderSearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         HeaderSearchPlaceholder.Visibility = string.IsNullOrEmpty(HeaderSearchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
-        OnSearchChanged(HeaderSearchBox.Text, fromHeader: true);
-    }
+        if (!_initialized) return;
 
-    private void HeroSearchBox_TextChanged(object sender, TextChangedEventArgs e)
-    {
-        HeroSearchPlaceholder.Visibility = string.IsNullOrEmpty(HeroSearchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
-        OnSearchChanged(HeroSearchBox.Text, fromHeader: false);
-    }
-
-    private void OnSearchChanged(string text, bool fromHeader)
-    {
-        if (!_initialized || _syncingSearch) return;
-
-        _syncingSearch = true;
-        if (fromHeader) HeroSearchBox.Text = text; else HeaderSearchBox.Text = text;
-        _syncingSearch = false;
-
-        _search = text.Trim();
+        _search = HeaderSearchBox.Text.Trim();
 
         // Searching from a page without a table jumps to the full time log.
         if (!string.IsNullOrEmpty(_search) && DashboardPage.Visibility != Visibility.Visible
@@ -458,12 +449,12 @@ public partial class ConsoleView : UserControl
     private void AddNote(string text, bool ok)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
-        row.Children.Add(new Ellipse { Width = 9, Height = 9, Fill = ok ? Br("#2DB7A3") : Br("#F28B6F"), VerticalAlignment = VerticalAlignment.Center });
+        row.Children.Add(new Ellipse { Width = 9, Height = 9, Fill = ok ? Br("#5BA7E6") : Br("#F2A900"), VerticalAlignment = VerticalAlignment.Center });
         row.Children.Add(new TextBlock
         {
             Text = text,
             FontSize = 12,
-            Foreground = Br("#10302D"),
+            Foreground = Br("#171C1F"),
             Margin = new Thickness(10, 0, 0, 0),
             TextWrapping = TextWrapping.Wrap,
             MaxWidth = 230
@@ -485,9 +476,9 @@ public partial class ConsoleView : UserControl
     {
         ToastBorder.Background = kind switch
         {
-            "success" => Br("#0F6B63"),
-            "warning" => Br("#C2680C"),
-            _ => Br("#C2410C"),
+            "success" => Br("#1C6EB4"),
+            "warning" => Br("#8A5F00"),
+            _ => Br("#BA1A1A"),
         };
         ToastText.Text = message;
         ToastBorder.Visibility = Visibility.Visible;
@@ -526,14 +517,135 @@ public partial class ConsoleView : UserControl
 
     private static string Clock(DateTime utc) => utc.ToLocalTime().ToString("hh:mm tt", CultureInfo.InvariantCulture);
 
+    /// <summary>
+    /// The branch's activity for the period: what the server recorded from all its readers, plus this PC's scans
+    /// that haven't reached it yet. Offline, this PC's own scans of the branch's current staff stand in.
+    /// A scan the server refused is not shown as attendance, and nor is anything from another branch.
+    /// </summary>
+    private List<AttendanceLogEntry> BranchLog(DateTime fromLocal, DateTime toLocalExclusive)
+    {
+        if (_store is null) return new List<AttendanceLogEntry>();
+
+        var staff = _store.GetAllEmployees().Select(e => e.TerminalUserId).ToHashSet();
+        var local = _store.GetLogBetween(fromLocal, toLocalExclusive)
+            .Where(l => staff.Contains(l.TerminalUserId) && l.EventType is "CLOCK_IN" or "CLOCK_OUT");
+
+        if (_branchAttendance is null)
+            return local.ToList();
+
+        DateTime fromUtc = fromLocal.ToUniversalTime(), toUtc = toLocalExclusive.ToUniversalTime();
+        var events = new List<AttendanceLogEntry>();
+        foreach (var record in _branchAttendance)
+        {
+            var id = $"emp-{record.EmployeeId}";
+            if (record.ClockIn is { } clockIn) events.Add(new AttendanceLogEntry($"server-{record.Id}-in", id, "CLOCK_IN", clockIn.ToUniversalTime()));
+            if (record.ClockOut is { } clockOut) events.Add(new AttendanceLogEntry($"server-{record.Id}-out", id, "CLOCK_OUT", clockOut.ToUniversalTime()));
+        }
+        events.RemoveAll(e => e.TimestampUtc < fromUtc || e.TimestampUtc >= toUtc);
+
+        // A scan newer than the last fetch may simply not have been picked up yet, so it shows until it is.
+        var unsent = _engine?.GetUnsentEventIds() ?? new HashSet<string>();
+        var onItsWay = local
+            .Where(l => unsent.Contains(l.EventId) || l.TimestampUtc >= _activityFetchedUtc)
+            .Where(l => !events.Exists(e => e.TerminalUserId == l.TerminalUserId && e.EventType == l.EventType
+                                            && (e.TimestampUtc - l.TimestampUtc).Duration() < TimeSpan.FromMinutes(2)))
+            .ToList();
+
+        events.AddRange(onItsWay);
+        return events.OrderBy(e => e.TimestampUtc).ToList();
+    }
+
+    private async Task LoadBranchActivityAsync()
+    {
+        var session = _session;
+        if (session?.BranchId is not long branchId || _apiClient is null || _loadingActivity) return;
+
+        var from = DateTime.Today.AddDays(-(ActivityDays - 1));
+        if (_pageDate < from) from = _pageDate;
+
+        _loadingActivity = true;
+        _activityFrom = from;   // set up front, so a failed load isn't retried on every redraw
+        try
+        {
+            var fetchedAt = DateTime.UtcNow;
+            var records = await _apiClient.GetBranchAttendanceAsync(branchId, from, DateTime.Today, session.AccessToken, CancellationToken.None);
+            if (records is null || !ReferenceEquals(session, _session)) return;
+
+            _branchAttendance = records;
+            _activityFetchedUtc = fetchedAt;
+            foreach (var record in records.Where(r => !string.IsNullOrWhiteSpace(r.EmployeeName)))
+                _branchAttendanceNames[$"emp-{record.EmployeeId}"] = record.EmployeeName!;
+
+            await LoadBreaksAsync(DateTime.Today, session, branchId);
+            if (_pageDate != DateTime.Today) await LoadBreaksAsync(_pageDate, session, branchId);
+
+            RefreshAttendance();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            // Offline: keep showing what we have. The 30 second refresh tries again.
+        }
+        finally
+        {
+            _loadingActivity = false;
+        }
+    }
+
+    private async Task LoadBreaksAsync(DateTime day, AuthResponse session, long branchId)
+    {
+        if (_apiClient is null) return;
+
+        var records = await _apiClient.GetBranchDayRecordsAsync(branchId, day, session.AccessToken, CancellationToken.None);
+        if (records is null || !ReferenceEquals(session, _session)) return;
+
+        // Times from the server are the company's local time, so ToUniversalTime reads them correctly.
+        _serverBreaks[day.Date] = records
+            .Where(r => r.Checkouts is { Count: > 0 })
+            .GroupBy(r => $"emp-{r.EmployeeId}")
+            .ToDictionary(g => g.Key, g => g.SelectMany(r => r.Checkouts!).Select(b => new BreakInfo(
+                b.Type == "LUNCH", b.CheckedOutAt.ToUniversalTime(), b.ExpectedBackAt?.ToUniversalTime(),
+                b.CheckedInAt?.ToUniversalTime(), b.Reason)).OrderBy(b => b.LeftUtc).ToList());
+    }
+
+    // This PC's own scans come first, as they include anything still on its way to the server.
+    private List<BreakInfo> BreaksFor(string userId, IReadOnlyList<AttendanceLogEntry> dayLog, DateTime day)
+    {
+        var breaks = new List<BreakInfo>();
+        foreach (var scan in dayLog.Where(l => l.TerminalUserId == userId))
+        {
+            if (scan.EventType is "LUNCH_OUT" or "EMERGENCY_OUT")
+                breaks.Add(new BreakInfo(scan.EventType == "LUNCH_OUT", scan.TimestampUtc, scan.ExpectedBackUtc, null, scan.Reason));
+            else if (scan.EventType == "BREAK_RETURN" && breaks.Count > 0 && breaks[^1].IsOut)
+                breaks[^1] = breaks[^1] with { BackUtc = scan.TimestampUtc };
+        }
+
+        if (breaks.Count > 0) return breaks;
+
+        return _serverBreaks.TryGetValue(day.Date, out var fromServer) && fromServer.TryGetValue(userId, out var list)
+            ? list : breaks;
+    }
+
+    private static string DescribeBreak(BreakInfo b)
+    {
+        var name = b.IsLunch ? "Lunch" : "Temporary";
+        var reason = string.IsNullOrWhiteSpace(b.Reason) ? string.Empty : $" ({b.Reason})";
+
+        if (b.BackUtc is not { } back)
+            return $"{name}: out since {Clock(b.LeftUtc)}" + (b.DueUtc is { } due ? $", {(b.IsLunch ? "due" : "expected")} {Clock(due)}" : string.Empty) + reason;
+
+        var late = b.MinutesLate > 0 ? $": {b.MinutesLate} min late" : b.IsLunch ? ": on time" : string.Empty;
+        return $"{name} {Clock(b.LeftUtc)}–{Clock(back)}{late}{reason}";
+    }
+
     private List<LogRow> BuildDayRows(DateTime day)
     {
         if (_store is null) return new List<LogRow>();
 
         var isToday = day.Date == DateTime.Today;
-        var byUser = _store.GetLogForDay(day).GroupBy(l => l.TerminalUserId)
+        var byUser = BranchLog(day.Date, day.Date.AddDays(1)).GroupBy(l => l.TerminalUserId)
             .ToDictionary(g => g.Key, g => g.OrderBy(x => x.TimestampUtc).ToList());
         var directory = _store.GetAllEmployees().ToDictionary(d => d.TerminalUserId);
+        var dayLog = _store.GetLogForDay(day);
 
         var rows = new List<LogRow>();
         foreach (var id in directory.Keys.Union(byUser.Keys))
@@ -542,7 +654,8 @@ public partial class ConsoleView : UserControl
             byUser.TryGetValue(id, out var ev);
             ev ??= new List<AttendanceLogEntry>();
 
-            var name = emp?.FullName ?? ShellWindow.FallbackName(id);
+            // Someone who has since moved away still shows by name on the days they worked here.
+            var name = emp?.FullName ?? _branchAttendanceNames.GetValueOrDefault(id) ?? ShellWindow.FallbackName(id);
             var number = emp?.EmployeeNumber ?? string.Empty;
             var sub = string.Join(" • ", new[] { emp?.Position, number }.Where(s => !string.IsNullOrWhiteSpace(s)));
 
@@ -563,18 +676,33 @@ public partial class ConsoleView : UserControl
             }
             else { key = "ABSENT"; status = "ABSENT"; sBg = RedBg; sFg = RedFg; }
 
+            var breaks = BreaksFor(id, dayLog, day);
+            var openBreak = breaks.LastOrDefault(b => b.IsOut);
+            var onBreak = isToday && key == "IN" && openBreak is not null;
+            var minutesLate = breaks.Sum(b => b.MinutesLate);
+            if (onBreak)
+            {
+                status = openBreak!.IsLunch ? "AT LUNCH" : "OUT TEMPORARILY";
+                sBg = WarnBg;
+                sFg = WarnFg;
+            }
+
             var firstIn = ev.FirstOrDefault(x => x.EventType == "CLOCK_IN");
             var clockIn = firstIn is null ? "—" : Clock(firstIn.TimestampUtc);
             var clockOut = ev.Count > 0 && ev[^1].EventType == "CLOCK_OUT" ? Clock(ev[^1].TimestampUtc) : "—";
 
             var punches = ev.Count == 0
                 ? "No scans recorded"
-                : string.Join("\n", ev.Select(x => $"{(x.EventType == "CLOCK_IN" ? "In " : "Out")}  {Clock(x.TimestampUtc)}"));
+                : string.Join("\n", ev.Select(x => $"{(x.EventType == "CLOCK_IN" ? "In " : "Out")}  {Clock(x.TimestampUtc)}")
+                    .Concat(breaks.Select(DescribeBreak)));
+            var breaksText = breaks.Count == 0 ? "—" : string.Join("\n", breaks.Select(DescribeBreak));
+            var breaksFg = minutesLate > 0 ? RedFg : onBreak ? WarnFg : breaks.Count > 0 ? InkSoft : AbsFg;
 
             var (bg, fg) = AvatarColors(id);
             rows.Add(new LogRow(0, id, name, number, sub, Initials(name), bg, fg, clockIn, clockOut,
                 ev.Count == 0 ? "—" : FormatHours(Worked(ev, isToday)), status, sBg, sFg, key, punches,
-                ev.Count > 0 ? ev[0].TimestampUtc : null, ev.Count > 0 ? ev[^1].TimestampUtc : null));
+                ev.Count > 0 ? ev[0].TimestampUtc : null, ev.Count > 0 ? ev[^1].TimestampUtc : null,
+                breaksText, breaksFg, onBreak, minutesLate));
         }
 
         // Reported first (by first clock-in), then everyone else A-Z.
@@ -592,7 +720,9 @@ public partial class ConsoleView : UserControl
         if (filter != "All")
             q = q.Where(r => filter switch
             {
-                "In" => r.StatusKey == "IN",
+                "In" => r.StatusKey == "IN" && !r.OnBreak,
+                "Break" => r.OnBreak,
+                "Late" => r.MinutesLate > 0,
                 "Out" => r.StatusKey is "OUT" or "NOOUT",
                 "Absent" => r.StatusKey is "ABSENT" or "NOENROLL",
                 _ => true
@@ -620,7 +750,8 @@ public partial class ConsoleView : UserControl
         var absent = _dashRows.Count(r => r.StatusKey == "ABSENT");
         var notEnrolled = _dashRows.Count(r => r.StatusKey == "NOENROLL");
         var reported = inCount + outCount;
-        var expected = Math.Max(0, _dashRows.Count - notEnrolled);
+        var expected = _dashRows.Count;
+        var notIn = absent + notEnrolled;
         var rate = expected > 0 ? Math.Min(100, reported * 100 / expected) : 0;
         var directoryCount = _store.GetAllEmployees().Count;
         var coverage = directoryCount > 0 ? Math.Min(100, _adapter.EnrolledCount * 100 / directoryCount) : 0;
@@ -628,17 +759,24 @@ public partial class ConsoleView : UserControl
 
         // Hero
         HeroPresentText.Text = inCount.ToString();
-        HeroNotInRun.Text = absent.ToString();
+        HeroNotInRun.Text = notIn.ToString();
         HeroOutRun.Text = outCount.ToString();
         HeroRateRun.Text = $"{rate}%";
+        var lateFromLunch = _dashRows.Count(r => r.MinutesLate > 0);
+        var onBreak = _dashRows.Count(r => r.OnBreak);
+        HeroLateRun.Text = string.Join(" ", new[]
+        {
+            onBreak > 0 ? $"{onBreak} on a break now." : null,
+            lateFromLunch > 0 ? $"{lateFromLunch} back late from lunch." : null,
+        }.Where(s => s is not null));
         BuildHeroAvatars();
 
         // Pie + legend
-        DrawPie(inCount, outCount, absent);
+        DrawPie(inCount, outCount, notIn);
         PieSubText.Text = expected > 0 ? $"{reported} of {expected} reported" : "No employees loaded";
         LegendInText.Text = $"{inCount} employee(s)";
         LegendOutText.Text = $"{outCount} employee(s)";
-        LegendAbsentText.Text = $"{absent} employee(s)";
+        LegendAbsentText.Text = $"{notIn} employee(s)";
 
         // Rings
         SetRing(RingA, RingAText, rate);
@@ -669,11 +807,20 @@ public partial class ConsoleView : UserControl
         HeroAvatars.Children.Clear();
 
         var inNow = _dashRows.Where(r => r.StatusKey == "IN").OrderByDescending(r => r.LastKey).ToList();
+        if (inNow.Count == 0)
+            HeroAvatars.Children.Add(new TextBlock
+            {
+                Text = "Nobody has clocked in yet.",
+                FontSize = 12,
+                Foreground = Br("#717782"),
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+
         for (var i = 0; i < Math.Min(3, inNow.Count); i++)
             HeroAvatars.Children.Add(AvatarBubble(inNow[i].Initials, inNow[i].AvatarBg, inNow[i].AvatarFg, i, inNow[i].EmployeeName));
 
         if (inNow.Count > 3)
-            HeroAvatars.Children.Add(AvatarBubble($"+{inNow.Count - 3}", Br("#CFE6E3"), Br("#0B3A35"), 3, $"{inNow.Count - 3} more"));
+            HeroAvatars.Children.Add(AvatarBubble($"+{inNow.Count - 3}", Br("#D2E4FF"), Br("#0B2A45"), 3, $"{inNow.Count - 3} more"));
     }
 
     private static Border AvatarBubble(string text, Brush bg, Brush fg, int index, string tip) => new()
@@ -697,70 +844,25 @@ public partial class ConsoleView : UserControl
         }
     };
 
-    // ----- Latest activity cards with 7-day sparklines -----
+    // ----- Latest activity -----
 
     private void RefreshLiveCards()
     {
-        if (_store is null) return;
-
-        var latest = _dashRows.Where(r => r.LastKey is not null && r.StatusKey is "IN" or "OUT")
-            .OrderByDescending(r => r.LastKey).Take(4).ToList();
-
-        var week = _store.GetLogSince(DateTime.Today.AddDays(-6));
-        var byUserDay = week.GroupBy(l => l.TerminalUserId).ToDictionary(
-            g => g.Key,
-            g => g.GroupBy(x => x.TimestampUtc.ToLocalTime().Date)
-                  .ToDictionary(d => d.Key, d => d.OrderBy(x => x.TimestampUtc).ToList()));
-
-        var sparkBrushes = new[] { Gold, MidTeal, Br("#5DBB63"), Br("#F28B6F") };
-        var cards = new List<LiveCard>();
-
-        for (var i = 0; i < latest.Count; i++)
-        {
-            var r = latest[i];
-            var values = new List<double>();
-            for (var d = 6; d >= 0; d--)
+        var cards = _dashRows.Where(r => r.LastKey is not null && r.StatusKey is "IN" or "OUT")
+            .OrderByDescending(r => r.LastKey).Take(5)
+            .Select(r =>
             {
-                var day = DateTime.Today.AddDays(-d);
-                var hours = 0.0;
-                if (byUserDay.TryGetValue(r.UserId, out var days) && days.TryGetValue(day, out var ev))
-                    hours = Worked(ev, day == DateTime.Today).TotalHours;
-                values.Add(hours);
-            }
-
-            var isIn = r.StatusKey == "IN";
-            var brush = sparkBrushes[i % sparkBrushes.Length];
-            cards.Add(new LiveCard(
-                r.EmployeeName,
-                string.IsNullOrWhiteSpace(r.Subtitle) ? "Employee" : r.Subtitle,
-                r.Initials, r.AvatarBg, r.AvatarFg,
-                isIn ? "ON SHIFT" : "LEFT", isIn ? InBg : OutBg, isIn ? InFg : OutFg,
-                r.Hours == "—" ? "0m" : r.Hours, "Hours today",
-                $"In {r.ClockIn}" + (r.ClockOut != "—" ? $" • Out {r.ClockOut}" : string.Empty),
-                SmoothSpark(values, 110, 34), brush));
-        }
+                var isIn = r.StatusKey == "IN";
+                return new LiveCard(r.EmployeeName, r.Subtitle, r.Initials, r.AvatarBg, r.AvatarFg,
+                    r.OnBreak ? "ON BREAK" : isIn ? "AT WORK" : "LEFT",
+                    r.OnBreak ? WarnBg : isIn ? InBg : OutBg,
+                    r.OnBreak ? WarnFg : isIn ? InFg : OutFg,
+                    $"In {r.ClockIn}" + (r.ClockOut != "—" ? $"  •  Out {r.ClockOut}" : string.Empty));
+            })
+            .ToList();
 
         LiveList.ItemsSource = cards;
         LiveEmptyText.Visibility = cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    private static Geometry SmoothSpark(IReadOnlyList<double> values, double width, double height)
-    {
-        var max = Math.Max(0.5, values.Max());
-        var pts = values.Select((v, i) => new Point(
-            i * width / (values.Count - 1),
-            height - 3 - (v / max) * (height - 8))).ToList();
-
-        var figure = new PathFigure { StartPoint = pts[0], IsClosed = false };
-        for (var i = 0; i < pts.Count - 1; i++)
-        {
-            var midX = (pts[i].X + pts[i + 1].X) / 2;
-            figure.Segments.Add(new BezierSegment(new Point(midX, pts[i].Y), new Point(midX, pts[i + 1].Y), pts[i + 1], true));
-        }
-
-        var geometry = new PathGeometry(new[] { figure });
-        geometry.Freeze();
-        return geometry;
     }
 
     // ----- Pie & rings -----
@@ -773,16 +875,16 @@ public partial class ConsoleView : UserControl
 
         if (total == 0)
         {
-            PieCanvas.Children.Add(new Ellipse { Width = r * 2, Height = r * 2, Fill = Br("#EEF2F3") });
+            PieCanvas.Children.Add(new Ellipse { Width = r * 2, Height = r * 2, Fill = Br("#E4EDF4") });
             Canvas.SetLeft(PieCanvas.Children[0], cx - r); Canvas.SetTop(PieCanvas.Children[0], cy - r);
-            var none = MakeText("No data yet", 11, Br("#7C8B8A"), FontWeights.SemiBold);
+            var none = MakeText("No data yet", 11, Br("#717782"), FontWeights.SemiBold);
             none.Width = 132; none.TextAlignment = TextAlignment.Center;
             Canvas.SetTop(none, cy - 8);
             PieCanvas.Children.Add(none);
             return;
         }
 
-        var slices = new[] { (a, DarkTeal, Brushes.White), (b, MidTeal, Brushes.White), (c, Gold, (Brush)Br("#10302D")) };
+        var slices = new[] { (a, DarkTeal, Brushes.White), (b, MidTeal, Brushes.White), (c, Gold, (Brush)Br("#171C1F")) };
         double start = 0;
 
         foreach (var (value, fill, labelBrush) in slices)
@@ -856,7 +958,7 @@ public partial class ConsoleView : UserControl
 
         if (_chartMode == "Today")
         {
-            var log = _store.GetLogForDay(DateTime.Today);
+            var log = BranchLog(DateTime.Today, DateTime.Today.AddDays(1));
             int minH = 6, maxH = 19;
             if (log.Count > 0)
             {
@@ -881,7 +983,7 @@ public partial class ConsoleView : UserControl
             var days = _chartMode == "7" ? 7 : 30;
             var start = DateTime.Today.AddDays(-(days - 1));
             var expected = _store.GetAllEmployees().Count;
-            var byDay = _store.GetLogSince(start).GroupBy(l => l.TimestampUtc.ToLocalTime().Date)
+            var byDay = BranchLog(start, DateTime.Today.AddDays(1)).GroupBy(l => l.TimestampUtc.ToLocalTime().Date)
                 .ToDictionary(g => g.Key, g => g.ToList());
 
             for (var i = 0; i < days; i++)
@@ -957,12 +1059,12 @@ public partial class ConsoleView : UserControl
                 X2 = w - right,
                 Y1 = y,
                 Y2 = y,
-                Stroke = Br("#E6EDEF"),
+                Stroke = Br("#E9EFF5"),
                 StrokeThickness = 1,
                 StrokeDashArray = new DoubleCollection { 3, 3 }
             });
 
-            var label = MakeText(((int)Math.Round(v)).ToString(), 10, Br("#8A9998"), FontWeights.Normal);
+            var label = MakeText(((int)Math.Round(v)).ToString(), 10, Br("#717782"), FontWeights.Normal);
             label.Width = left - 8; label.TextAlignment = TextAlignment.Right;
             Canvas.SetLeft(label, 0); Canvas.SetTop(label, y - 7);
             ChartCanvas.Children.Add(label);
@@ -994,7 +1096,7 @@ public partial class ConsoleView : UserControl
 
             if (i % stride == 0)
             {
-                var xl = MakeText(bar.Label, 10, Br("#8A9998"), FontWeights.Normal);
+                var xl = MakeText(bar.Label, 10, Br("#717782"), FontWeights.Normal);
                 xl.Width = slot * stride; xl.TextAlignment = TextAlignment.Center;
                 Canvas.SetLeft(xl, left + slot * i - (slot * (stride - 1)) / 2); Canvas.SetTop(xl, top + plotH + 6);
                 ChartCanvas.Children.Add(xl);
@@ -1003,7 +1105,7 @@ public partial class ConsoleView : UserControl
 
         if (rawMax == 0)
         {
-            var empty = MakeText("No activity yet", 12, Br("#7C8B8A"), FontWeights.SemiBold);
+            var empty = MakeText("No activity yet", 12, Br("#717782"), FontWeights.SemiBold);
             empty.Width = plotW; empty.TextAlignment = TextAlignment.Center;
             Canvas.SetLeft(empty, left); Canvas.SetTop(empty, top + plotH / 2 - 8);
             ChartCanvas.Children.Add(empty);
@@ -1049,6 +1151,10 @@ public partial class ConsoleView : UserControl
     {
         if (!_initialized || _store is null) return;
 
+        if (_session is not null && _pageDate < _activityFrom) _ = LoadBranchActivityAsync();
+        if (_session is { BranchId: long branchId } session && !_serverBreaks.ContainsKey(_pageDate.Date))
+            _ = LoadPageBreaksAsync(_pageDate.Date, session, branchId);
+
         _pageRows = BuildDayRows(_pageDate);
         var shown = ApplyFilter(_pageRows, _pageFilter, _search);
 
@@ -1065,6 +1171,19 @@ public partial class ConsoleView : UserControl
         PageSummaryText.Text = $"{_pageDate:dddd, d MMMM yyyy}  •  {reported} reported" +
                                (isToday ? $"  •  {inNow} currently in" : string.Empty) +
                                $"  •  showing {shown.Count} of {_pageRows.Count}";
+    }
+
+    private async Task LoadPageBreaksAsync(DateTime day, AuthResponse session, long branchId)
+    {
+        try
+        {
+            await LoadBreaksAsync(day, session, branchId);
+            if (_serverBreaks.ContainsKey(day) && ReferenceEquals(session, _session)) RefreshPageLog();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            // Offline: the page keeps showing this PC's own scans.
+        }
     }
 
     private void ExportToday_Click(object sender, RoutedEventArgs e) =>
@@ -1092,10 +1211,10 @@ public partial class ConsoleView : UserControl
         static string Q(string s) => "\"" + s.Replace("\"", "\"\"") + "\"";
 
         var sb = new StringBuilder();
-        sb.AppendLine("Employee,Employee No,Date,Clock in,Clock out,Hours,Status");
+        sb.AppendLine("Employee,Employee No,Date,Clock in,Clock out,Hours,Breaks,Status");
         foreach (var r in rows)
             sb.AppendLine(string.Join(",", Q(r.EmployeeName), Q(r.EmployeeNumber), Q(day.ToString("yyyy-MM-dd")),
-                Q(r.ClockIn), Q(r.ClockOut), Q(r.Hours), Q(r.Status)));
+                Q(r.ClockIn), Q(r.ClockOut), Q(r.Hours), Q(r.Breaks.Replace("\n", "; ")), Q(r.Status)));
 
         try
         {
@@ -1138,24 +1257,8 @@ public partial class ConsoleView : UserControl
         if (session is null || _apiClient is null || _store is null) return;
         if (_loadingEmployees) return;
 
-        // A Back Office account works across branches, so it may not be tied to one. Use the assigned
-        // branch if there is one; otherwise ask once per sign-in which branch this terminal is serving.
-        if (_activeBranchId is null)
-        {
-            _activeBranchId = session.BranchId ?? await ResolveBranchAsync(session);
-
-            if (!ReferenceEquals(session, _session)) return;   // signed out while choosing
-
-            if (_activeBranchId is null)
-            {
-                ShowToast("Choose a branch to load its employees.", "warning");
-                return;
-            }
-        }
-
-        var branchId = _activeBranchId.Value;
-        DamagesPage.SetBranch(branchId);
-        DaysWorkedPage.SetBranch(branchId);
+        // The sign-in refuses an account with no branch, so this is only a safety net.
+        if (session.BranchId is not long branchId) return;
 
         _loadingEmployees = true;
         EmployeeCountText.Text = "Loading employees…";
@@ -1163,16 +1266,28 @@ public partial class ConsoleView : UserControl
 
         try
         {
-            var employees = await _apiClient.GetEmployeesByBranchAsync(branchId, session.AccessToken, CancellationToken.None);
+            var loaded = await _apiClient.GetEmployeesByBranchAsync(branchId, session.AccessToken, CancellationToken.None);
 
             if (!ReferenceEquals(session, _session)) return;   // signed out while loading
 
-            // Cache names locally so the kiosk can greet people without any login.
-            _store.UpsertEmployees(employees.Select(e => new EmployeeDirectoryEntry(
-                $"emp-{e.Id}", e.Id, e.FullName, e.EmployeeNumber, e.Position, e.BranchName)));
+            if (loaded is null)
+            {
+                EmployeeCountText.Text = "Failed to load employees — check connection";
+                ShowToast("Couldn't load this branch's employees. Check the internet connection.", "error");
+                return;
+            }
+
+            var employees = loaded.Where(e => string.Equals(e.EmploymentStatus, "ACTIVE", StringComparison.OrdinalIgnoreCase)).ToList();
+
+            // This branch's people and no one else. Also lets the kiosk greet them without any login.
+            _store.ReplaceEmployees(employees.Select(e => new EmployeeDirectoryEntry(
+                $"emp-{e.Id}", e.Id, e.FullName, e.EmployeeNumber, e.Position, e.BranchName)).ToList());
 
             _employeeSummaries = employees;
             DamagesPage.SetEmployees(employees);
+
+            _branchName = employees.FirstOrDefault(e => !string.IsNullOrWhiteSpace(e.BranchName))?.BranchName ?? _branchName;
+            ApplySessionToUi();
             ApplyPickerFilter();
 
             if (employees.Count == 0)
@@ -1180,6 +1295,7 @@ public partial class ConsoleView : UserControl
 
             RefreshAttendance();
             RefreshDeviceInfo();
+            _ = LoadBranchActivityAsync();
         }
         catch (Exception ex)
         {
@@ -1195,56 +1311,49 @@ public partial class ConsoleView : UserControl
         }
     }
 
-    // Pages that depend on the branch: make sure it has been chosen (asks once per sign-in), then load.
-    private async Task OpenBranchPageAsync(Func<Task> refresh)
+    // Fingerprints enrolled here before they were stored centrally only exist on this PC. Uploading takes a
+    // signed-in officer, so it happens at sign-in. Anything that fails stays on this PC and is tried next time.
+    private async Task BackUpLocalFingerprintsAsync(AuthResponse session)
     {
-        if (_activeBranchId is null)
-        {
-            _loadingEmployees = false;
-            await LoadEmployeesAsync();
-        }
-
-        if (_activeBranchId is not null)
-            await refresh();
-    }
-
-    // Back Office sign-in without an assigned branch: one active branch is used straight away, several
-    // are offered in a small picker. Returns null when nothing was chosen.
-    private async Task<long?> ResolveBranchAsync(AuthResponse session)
-    {
-        if (_apiClient is null) return null;
+        if (_adapter is null || _apiClient is null || _apiClient.Identity is null) return;
 
         try
         {
-            var all = await _apiClient.GetBranchesAsync(session.AccessToken, CancellationToken.None);
-            if (!ReferenceEquals(session, _session)) return null;
+            // Pull first: whatever the server already holds must not be overwritten by an older local copy.
+            if (_engine is null || !await _engine.SyncFingerprintsNowAsync(CancellationToken.None)) return;
 
-            if (all is null)
+            int saved = 0, failed = 0;
+            foreach (var (terminalUserId, template) in _adapter.GetTemplatesNotBackedUp())
             {
-                ShowToast("Couldn't load the branches. Check the internet connection.", "error");
-                return null;
+                if (!ReferenceEquals(session, _session)) return;   // signed out meanwhile
+
+                if (!terminalUserId.StartsWith("emp-", StringComparison.Ordinal)
+                    || !long.TryParse(terminalUserId.AsSpan(4), out var employeeId))
+                {
+                    continue;
+                }
+
+                var result = await _apiClient.SaveFingerprintAsync(employeeId, terminalUserId, template, session.AccessToken, CancellationToken.None);
+                if (result.Succeeded)
+                {
+                    await _adapter.MarkBackedUpAsync(terminalUserId);
+                    saved++;
+                }
+                else
+                {
+                    failed++;
+                }
             }
 
-            var branches = all
-                .Where(b => !string.Equals(b.Status, "INACTIVE", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (branches.Count == 0)
-            {
-                ShowToast("No branches were found. Contact your administrator.", "error");
-                return null;
-            }
-
-            if (branches.Count == 1) return branches[0].Id;
-
-            var picker = new BranchPickerWindow(branches) { Owner = Window.GetWindow(this) };
-            return picker.ShowDialog() == true ? picker.Selected?.Id : null;
+            if (!ReferenceEquals(session, _session)) return;
+            if (failed > 0)
+                ShowToast($"{failed} fingerprint(s) couldn't be saved to the server. They will be tried again at the next sign-in.", "warning");
+            else if (saved > 0)
+                ShowToast($"{saved} fingerprint(s) saved to the server.", "success");
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            ShowToast("Couldn't load the branches. Check the internet connection.", "error");
-            return null;
+            // Offline: nothing lost, this runs again at the next sign-in.
         }
     }
 
@@ -1270,7 +1379,7 @@ public partial class ConsoleView : UserControl
                 return new PickerItem(
                     emp.Id, emp.FullName, Initials(emp.FullName),
                     string.Join(" • ", new[] { emp.Position, emp.EmployeeNumber }.Where(s => !string.IsNullOrWhiteSpace(s))),
-                    enrolled ? "✓ Enrolled" : "Pending", enrolled ? InFg : WarnFg, bg, fg, enrolled, emp);
+                    enrolled ? "Enrolled" : "Pending", enrolled ? InFg : WarnFg, bg, fg, enrolled, emp);
             })
             .ToList();
 
@@ -1344,10 +1453,13 @@ public partial class ConsoleView : UserControl
 
             SetEnrollState(EnrollUiState.Registering);
 
+            var template = _adapter.GetTemplate(terminalUserId)
+                           ?? throw new InvalidOperationException("The captured fingerprint is missing.");
+
             SyncResult result;
             try
             {
-                result = await _apiClient.RegisterEnrollmentAsync(selected.Id, terminalUserId, session.AccessToken, CancellationToken.None);
+                result = await _apiClient.SaveFingerprintAsync(selected.Id, terminalUserId, template, session.AccessToken, CancellationToken.None);
             }
             catch (Exception)
             {
@@ -1366,13 +1478,15 @@ public partial class ConsoleView : UserControl
                 return;
             }
 
+            await _adapter.MarkBackedUpAsync(terminalUserId);
+
             _store.UpsertEmployees(new[]
             {
                 new EmployeeDirectoryEntry(terminalUserId, selected.Id, selected.Employee.FullName,
                     selected.Employee.EmployeeNumber, selected.Employee.Position, selected.Employee.BranchName)
             });
 
-            SetEnrollState(EnrollUiState.Success, $"{selected.Employee.FullName} can now clock in at the kiosk.");
+            SetEnrollState(EnrollUiState.Success, $"{selected.Employee.FullName} can now use the reader.");
             ShowToast($"{selected.Name} enrolled successfully.", "success");
 
             ApplyPickerFilter();
@@ -1398,8 +1512,8 @@ public partial class ConsoleView : UserControl
         {
             case EnrollUiState.Ready:
                 EnrollHeadlineText.Text = "Ready to enroll";
-                EnrollSubtext.Text = detail ?? "Select an employee, then press Enroll Fingerprint.";
-                SetStagePill("Ready", "#DDF0EC", "#0F6B63");
+                EnrollSubtext.Text = detail ?? "Select an employee, then press Enroll fingerprint.";
+                SetStagePill("Ready", "#D2E4FF", "#1C6EB4");
                 UpdateSteps(1);
                 StopEnrollAnimations();
                 break;
@@ -1407,7 +1521,7 @@ public partial class ConsoleView : UserControl
             case EnrollUiState.Capturing:
                 EnrollHeadlineText.Text = "Place finger firmly on the reader…";
                 EnrollSubtext.Text = "Hold still until the capture finishes (up to 5 seconds).";
-                SetStagePill("Capturing", "#FFEDD5", "#C2410C");
+                SetStagePill("Capturing", "#FFF4D6", "#BA1A1A");
                 UpdateSteps(2);
                 StartEnrollAnimations();
                 break;
@@ -1415,7 +1529,7 @@ public partial class ConsoleView : UserControl
             case EnrollUiState.Registering:
                 EnrollHeadlineText.Text = "Fingerprint captured";
                 EnrollSubtext.Text = "Saving to the server…";
-                SetStagePill("Saving", "#DDF0EC", "#0F6B63");
+                SetStagePill("Saving", "#D2E4FF", "#1C6EB4");
                 UpdateSteps(3);
                 StopEnrollAnimations();
                 break;
@@ -1423,7 +1537,7 @@ public partial class ConsoleView : UserControl
             case EnrollUiState.Success:
                 EnrollHeadlineText.Text = "Fingerprint enrolled";
                 EnrollSubtext.Text = detail ?? string.Empty;
-                SetStagePill("Enrolled", "#DCFCE7", "#15803D");
+                SetStagePill("Enrolled", "#E5F4E2", "#2E7D24");
                 UpdateSteps(4);
                 StopEnrollAnimations();
                 break;
@@ -1431,7 +1545,7 @@ public partial class ConsoleView : UserControl
             case EnrollUiState.Failed:
                 EnrollHeadlineText.Text = "Enrollment didn't complete";
                 EnrollSubtext.Text = detail ?? "Please try again.";
-                SetStagePill("Failed", "#FEE2E2", "#B91C1C");
+                SetStagePill("Failed", "#FFDAD6", "#BA1A1A");
                 UpdateSteps(1);
                 StopEnrollAnimations();
                 break;
@@ -1457,15 +1571,15 @@ public partial class ConsoleView : UserControl
     {
         if (step < current)
         {
-            circle.Background = Br("#D1FAE5"); number.Text = "✓"; number.Foreground = Br("#059669"); label.Foreground = Br("#059669");
+            circle.Background = Br("#E5F4E2"); number.Text = "\uE5CA"; number.FontFamily = (FontFamily)circle.FindResource("IconFont"); number.Foreground = Br("#3B9A2F"); label.Foreground = Br("#3B9A2F");
         }
         else if (step == current)
         {
-            circle.Background = Br("#DDF0EC"); number.Text = n; number.Foreground = Br("#0F6B63"); label.Foreground = Br("#0F6B63");
+            circle.Background = Br("#D2E4FF"); number.Text = n; number.ClearValue(TextBlock.FontFamilyProperty); number.Foreground = Br("#1C6EB4"); label.Foreground = Br("#1C6EB4");
         }
         else
         {
-            circle.Background = Br("#F1F5F9"); number.Text = n; number.Foreground = Br("#94A3B8"); label.Foreground = Br("#94A3B8");
+            circle.Background = Br("#F0F4F8"); number.Text = n; number.ClearValue(TextBlock.FontFamilyProperty); number.Foreground = Br("#717782"); label.Foreground = Br("#717782");
         }
     }
 

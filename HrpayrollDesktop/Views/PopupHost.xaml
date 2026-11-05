@@ -1,0 +1,271 @@
+<UserControl x:Class="HrpayrollDesktop.PopupHost"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             PreviewKeyDown="Root_PreviewKeyDown">
+    <UserControl.Resources>
+        <!-- The white card every pop-up sits on -->
+        <Style x:Key="PopupCard" TargetType="Border">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="CornerRadius" Value="18"/>
+            <Setter Property="Padding" Value="28,28,28,22"/>
+            <Setter Property="Width" Value="420"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Effect" Value="{StaticResource ShadowLarge}"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+        </Style>
+
+        <!-- A large choice with a picture -->
+        <Style x:Key="OptionBtn" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}"
+                                BorderThickness="1.5" CornerRadius="14" Padding="14,12">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource BlueSoftBrush}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BlueBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <DataTemplate x:Key="ListRowTemplate">
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Border Width="34" Height="34" CornerRadius="17" Background="{Binding AvatarBg}">
+                    <TextBlock Text="{Binding Initials}" Foreground="{Binding AvatarFg}" FontSize="11" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <StackPanel Grid.Column="1" Margin="10,0,8,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Name}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"
+                               TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding Detail}" Style="{StaticResource Sub}" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+                <TextBlock Grid.Column="2" Text="{Binding Time}" Style="{StaticResource Sub}" VerticalAlignment="Center"/>
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid>
+        <!-- ===== Back Office dialogs: a scan may need to appear over these without losing what was being done ===== -->
+        <Grid x:Name="DialogLayer" Visibility="Collapsed" Background="#73162B40">
+            <Border x:Name="ConfirmCard" Style="{StaticResource PopupCard}" Visibility="Collapsed">
+                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                <StackPanel>
+                    <Grid Width="84" Height="84" HorizontalAlignment="Center">
+                        <Ellipse x:Name="ConfirmHalo" Fill="{StaticResource BlueSoftBrush}"/>
+                        <Ellipse x:Name="ConfirmDot" Width="54" Height="54" Fill="{StaticResource BlueBrush}"/>
+                        <TextBlock x:Name="ConfirmIcon" Text="&#xE887;" Style="{StaticResource Icon}" FontSize="28" Foreground="White"
+                                   HorizontalAlignment="Center"/>
+                    </Grid>
+                    <TextBlock x:Name="ConfirmTitle" Style="{StaticResource PageTitle}" FontSize="18" HorizontalAlignment="Center" TextAlignment="Center"
+                               TextWrapping="Wrap" Margin="0,16,0,0"/>
+                    <TextBlock x:Name="ConfirmBody" FontSize="12" LineHeight="18" Foreground="{StaticResource InkSoftBrush}" TextAlignment="Center"
+                               TextWrapping="Wrap" Margin="0,8,0,20"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="10"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="ConfirmNoButton" Style="{StaticResource SoftBtn}" Content="No, go back" Click="ConfirmNo_Click"/>
+                        <Button x:Name="ConfirmYesButton" Grid.Column="2" Style="{StaticResource PrimaryBtn}" Padding="0,12" Click="ConfirmYes_Click"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Border x:Name="ListCard" Style="{StaticResource PopupCard}" Width="460" Visibility="Collapsed">
+                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                <StackPanel>
+                    <TextBlock x:Name="ListTitle" Style="{StaticResource PageTitle}" FontSize="18"/>
+                    <TextBlock x:Name="ListSub" Style="{StaticResource Sub}" Margin="0,2,0,14" TextWrapping="Wrap"/>
+                    <ScrollViewer MaxHeight="380" VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <ItemsControl x:Name="ListItems" ItemTemplate="{StaticResource ListRowTemplate}"/>
+                            <TextBlock x:Name="ListEmpty" Style="{StaticResource Sub}" FontSize="12" Margin="0,0,0,12" Visibility="Collapsed"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                    <Button Style="{StaticResource SoftBtn}" Content="Close" Margin="0,8,0,0" Click="ListClose_Click"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- ===== What happens at the reader ===== -->
+        <Grid x:Name="ScanLayer" Visibility="Collapsed" Background="#73162B40">
+
+            <!-- Scanning, or waiting for a finger -->
+            <Border x:Name="ScanCard" Style="{StaticResource PopupCard}" Visibility="Collapsed">
+                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                <StackPanel>
+                    <Grid Width="130" Height="130" HorizontalAlignment="Center">
+                        <Ellipse x:Name="ScanPulse" Fill="{StaticResource BlueSoftBrush}" RenderTransformOrigin="0.5,0.5">
+                            <Ellipse.RenderTransform><ScaleTransform x:Name="ScanPulseScale"/></Ellipse.RenderTransform>
+                        </Ellipse>
+                        <Ellipse Width="84" Height="84" Fill="{StaticResource BlueBrush}"/>
+                        <TextBlock Text="&#xE90D;" Style="{StaticResource Icon}" FontSize="48" Foreground="White" HorizontalAlignment="Center"/>
+                    </Grid>
+                    <TextBlock x:Name="ScanTitle" Style="{StaticResource PageTitle}" FontSize="18" HorizontalAlignment="Center" Margin="0,14,0,0"/>
+                    <TextBlock x:Name="ScanBody" FontSize="12" LineHeight="18" Foreground="{StaticResource InkSoftBrush}" TextAlignment="Center"
+                               TextWrapping="Wrap" Margin="0,6,0,4"/>
+                    <Button x:Name="ScanCancelButton" Style="{StaticResource SoftBtn}" Content="Close" Margin="0,16,0,0" Click="ScanCancel_Click"/>
+                </StackPanel>
+            </Border>
+
+            <!-- A result: same shape as the design's "Request Sent Successfully" -->
+            <Border x:Name="MessageCard" Style="{StaticResource PopupCard}" Visibility="Collapsed">
+                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                <StackPanel>
+                    <Grid Width="84" Height="84" HorizontalAlignment="Center">
+                        <Ellipse x:Name="MessageHalo"/>
+                        <Ellipse x:Name="MessageDot" Width="54" Height="54"/>
+                        <TextBlock x:Name="MessageIcon" Style="{StaticResource Icon}" FontSize="30" Foreground="White" HorizontalAlignment="Center"/>
+                    </Grid>
+                    <TextBlock x:Name="MessageTitle" Style="{StaticResource PageTitle}" FontSize="18" HorizontalAlignment="Center" TextAlignment="Center"
+                               TextWrapping="Wrap" Margin="0,16,0,0"/>
+                    <TextBlock x:Name="MessageBody" FontSize="12" LineHeight="18" Foreground="{StaticResource InkSoftBrush}" TextAlignment="Center"
+                               TextWrapping="Wrap" Margin="0,8,0,0"/>
+                    <Border x:Name="MessageNote" CornerRadius="10" Padding="12,9" Margin="0,14,0,0" Visibility="Collapsed">
+                        <TextBlock x:Name="MessageNoteText" FontSize="11" FontWeight="Medium" TextAlignment="Center" TextWrapping="Wrap"/>
+                    </Border>
+                    <Button x:Name="MessageCloseButton" Style="{StaticResource SoftBtn}" Margin="0,20,0,0" Click="MessageClose_Click"/>
+                </StackPanel>
+            </Border>
+
+            <!-- At work and scanned: lunch, temporary check-out, or end of day -->
+            <Border x:Name="ChoiceCard" Style="{StaticResource PopupCard}" Width="470" Visibility="Collapsed">
+                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <Border x:Name="ChoiceAvatar" Width="48" Height="48" CornerRadius="24" Background="{StaticResource BlueFixedBrush}">
+                            <TextBlock x:Name="ChoiceInitials" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <StackPanel Margin="12,0,0,0" VerticalAlignment="Center" MaxWidth="340">
+                            <TextBlock x:Name="ChoiceTitle" Style="{StaticResource PageTitle}" FontSize="18" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="ChoiceSub" Style="{StaticResource Sub}" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <TextBlock Text="Where are you going?" Style="{StaticResource SectionTitle}" Margin="0,18,0,10"/>
+
+                    <Button x:Name="LunchOptionButton" Style="{StaticResource OptionBtn}" Click="ChooseLunch_Click">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Image Source="/Assets/3D/lunch.png" Width="44" Height="44" RenderOptions.BitmapScalingMode="HighQuality"/>
+                            <StackPanel Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center">
+                                <TextBlock Text="Lunch break" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
+                                <TextBlock x:Name="LunchOptionDetail" Style="{StaticResource Sub}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="2" Text="&#xE5CC;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource BlueBrush}"/>
+                        </Grid>
+                    </Button>
+
+                    <Button x:Name="TemporaryOptionButton" Style="{StaticResource OptionBtn}" Click="ChooseTemporary_Click">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Image Source="/Assets/3D/door.png" Width="44" Height="44" RenderOptions.BitmapScalingMode="HighQuality"/>
+                            <StackPanel Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center">
+                                <TextBlock Text="Temporary check-out" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
+                                <TextBlock Text="An emergency. Give a reason and when you'll be back. Not counted as late."
+                                           Style="{StaticResource Sub}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="2" Text="&#xE5CC;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource BlueBrush}"/>
+                        </Grid>
+                    </Button>
+
+                    <Button x:Name="ClockOutOptionButton" Style="{StaticResource OptionBtn}" Click="ChooseClockOut_Click">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Image Source="/Assets/3D/briefcase.png" Width="44" Height="44" RenderOptions.BitmapScalingMode="HighQuality"/>
+                            <StackPanel Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center">
+                                <TextBlock Text="Check out for the day" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
+                                <TextBlock Text="You have finished work. This ends your day." Style="{StaticResource Sub}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="2" Text="&#xE5CC;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource BlueBrush}"/>
+                        </Grid>
+                    </Button>
+
+                    <Button x:Name="ChoiceCancelButton" Style="{StaticResource GhostBtn}" HorizontalAlignment="Right" Margin="0,4,0,0" Click="ChoiceCancel_Click">
+                        <TextBlock x:Name="ChoiceCancelText" Text="Cancel"/>
+                    </Button>
+                </StackPanel>
+            </Border>
+
+            <!-- Temporary check-out details -->
+            <Border x:Name="TemporaryCard" Style="{StaticResource PopupCard}" Width="470" Visibility="Collapsed">
+                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <Image Source="/Assets/3D/door.png" Width="48" Height="48" RenderOptions.BitmapScalingMode="HighQuality"/>
+                        <StackPanel Margin="12,0,0,0" VerticalAlignment="Center" MaxWidth="340">
+                            <TextBlock Text="Temporary check-out" Style="{StaticResource PageTitle}" FontSize="18"/>
+                            <TextBlock x:Name="TemporarySub" Style="{StaticResource Sub}" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <TextBlock Text="Why do you need to leave?" Style="{StaticResource FieldLabel}" Margin="0,18,0,8"/>
+                    <WrapPanel x:Name="ReasonChips">
+                        <RadioButton Style="{StaticResource ChipBtn}" GroupName="ReasonChip" Content="Medical" Tag="Medical" Checked="ReasonChip_Checked"/>
+                        <RadioButton Style="{StaticResource ChipBtn}" GroupName="ReasonChip" Content="Family emergency" Tag="Family emergency" Checked="ReasonChip_Checked"/>
+                        <RadioButton Style="{StaticResource ChipBtn}" GroupName="ReasonChip" Content="Personal errand" Tag="Personal errand" Checked="ReasonChip_Checked"/>
+                        <RadioButton x:Name="ReasonOtherChip" Style="{StaticResource ChipBtn}" GroupName="ReasonChip" Content="Other" Tag="" Checked="ReasonChip_Checked"/>
+                    </WrapPanel>
+                    <Border Style="{StaticResource InputShell}" Height="44" Margin="0,4,0,0">
+                        <Grid>
+                            <TextBox x:Name="ReasonBox" Style="{StaticResource InputBox}" MaxLength="200" TextChanged="ReasonBox_TextChanged"/>
+                            <TextBlock x:Name="ReasonPlaceholder" Text="Type the reason" Foreground="{StaticResource MutedBrush}" FontSize="12"
+                                       VerticalAlignment="Center" IsHitTestVisible="False"/>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Text="What time will you be back today?" Style="{StaticResource FieldLabel}" Margin="0,14,0,6"/>
+                    <ComboBox x:Name="ReturnTimeCombo" SelectionChanged="ReturnTimeCombo_SelectionChanged"/>
+
+                    <TextBlock x:Name="TemporaryError" Foreground="{StaticResource ErrorBrush}" FontSize="11" FontWeight="Medium"
+                               TextWrapping="Wrap" Margin="0,10,0,0" Visibility="Collapsed"/>
+
+                    <Grid Margin="0,18,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="10"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="TemporaryBackButton" Style="{StaticResource SoftBtn}" Content="Back" Click="TemporaryBack_Click"/>
+                        <Button x:Name="TemporaryConfirmButton" Grid.Column="2" Style="{StaticResource PrimaryBtn}" Content="Check out" Click="TemporaryConfirm_Click"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- A small hint while nothing else is open -->
+        <Border x:Name="HintToast" Visibility="Collapsed" Background="{StaticResource NavyBrush}" CornerRadius="10" Padding="16,10"
+                HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,28" Effect="{StaticResource ShadowMid}" IsHitTestVisible="False">
+            <TextBlock x:Name="HintText" Foreground="White" FontSize="12" FontWeight="Medium"/>
+        </Border>
+    </Grid>
+</UserControl>

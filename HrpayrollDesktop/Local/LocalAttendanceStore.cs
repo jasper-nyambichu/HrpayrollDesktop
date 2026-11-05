@@ -1,4 +1,4 @@
-﻿using Microsoft.Data.Sqlite;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
@@ -19,7 +19,9 @@ public record AttendanceLogEntry(
     string EventId,
     string TerminalUserId,
     string EventType,
-    DateTime TimestampUtc);
+    DateTime TimestampUtc,
+    DateTime? ExpectedBackUtc = null,
+    string? Reason = null);
 
 /// <summary>
 /// Device-local data that must survive syncing: who each terminal user is
@@ -68,7 +70,28 @@ public class LocalAttendanceStore
             """;
         command.ExecuteNonQuery();
 
+        // Upgrade an older database in place: nothing already logged is lost.
+        EnsureLogColumn(connection, "ExpectedBackUtc");
+        EnsureLogColumn(connection, "Reason");
+
         _logger.LogInformation("Local attendance store initialized at {ConnectionString}", _connectionString);
+    }
+
+    private static void EnsureLogColumn(SqliteConnection connection, string column)
+    {
+        using (var check = connection.CreateCommand())
+        {
+            check.CommandText = "PRAGMA table_info(attendance_log);";
+            using var reader = check.ExecuteReader();
+            while (reader.Read())
+            {
+                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase)) return;
+            }
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE attendance_log ADD COLUMN {column} TEXT;";
+        alter.ExecuteNonQuery();
     }
 
     public void UpsertEmployees(IEnumerable<EmployeeDirectoryEntry> entries)
@@ -107,6 +130,37 @@ public class LocalAttendanceStore
         tx.Commit();
     }
 
+    /// <summary>Makes the directory exactly this list, so nobody from another branch or an earlier setup lingers.</summary>
+    public void ReplaceEmployees(IReadOnlyCollection<EmployeeDirectoryEntry> entries)
+    {
+        using (var connection = new SqliteConnection(_connectionString))
+        {
+            connection.Open();
+            var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM employee_directory;";
+            command.ExecuteNonQuery();
+        }
+
+        UpsertEmployees(entries);
+    }
+
+    /// <summary>Drops anyone no longer on the branch's roster, for a kiosk that has nobody signed in.</summary>
+    public void RemoveEmployeesNotIn(IReadOnlyCollection<long> roster)
+    {
+        var stillHere = new HashSet<long>(roster);
+        foreach (var entry in GetAllEmployees())
+        {
+            if (stillHere.Contains(entry.EmployeeId)) continue;
+
+            using var connection = new SqliteConnection(_connectionString);
+            connection.Open();
+            var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM employee_directory WHERE TerminalUserId = $id;";
+            command.Parameters.AddWithValue("$id", entry.TerminalUserId);
+            command.ExecuteNonQuery();
+        }
+    }
+
     public EmployeeDirectoryEntry? GetEmployee(string terminalUserId)
     {
         using var connection = new SqliteConnection(_connectionString);
@@ -142,20 +196,23 @@ public class LocalAttendanceStore
         return results;
     }
 
-    public void AppendLog(string eventId, string terminalUserId, string eventType, DateTime timestampUtc)
+    public void AppendLog(string eventId, string terminalUserId, string eventType, DateTime timestampUtc,
+        DateTime? expectedBackUtc = null, string? reason = null)
     {
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
 
         var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT OR IGNORE INTO attendance_log (EventId, TerminalUserId, EventType, Timestamp)
-            VALUES ($eventId, $terminalUserId, $eventType, $timestamp);
+            INSERT OR IGNORE INTO attendance_log (EventId, TerminalUserId, EventType, Timestamp, ExpectedBackUtc, Reason)
+            VALUES ($eventId, $terminalUserId, $eventType, $timestamp, $expectedBack, $reason);
             """;
         command.Parameters.AddWithValue("$eventId", eventId);
         command.Parameters.AddWithValue("$terminalUserId", terminalUserId);
         command.Parameters.AddWithValue("$eventType", eventType);
         command.Parameters.AddWithValue("$timestamp", timestampUtc.ToUniversalTime().ToString("O"));
+        command.Parameters.AddWithValue("$expectedBack", expectedBackUtc is { } back ? back.ToUniversalTime().ToString("O") : DBNull.Value);
+        command.Parameters.AddWithValue("$reason", (object?)reason ?? DBNull.Value);
         command.ExecuteNonQuery();
     }
 
@@ -166,9 +223,29 @@ public class LocalAttendanceStore
 
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT EventId, TerminalUserId, EventType, Timestamp
+            SELECT EventId, TerminalUserId, EventType, Timestamp, ExpectedBackUtc, Reason
             FROM attendance_log
             WHERE TerminalUserId = $id AND Timestamp >= $start
+            ORDER BY Timestamp DESC
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$id", terminalUserId);
+        command.Parameters.AddWithValue("$start", DateTime.Today.ToUniversalTime().ToString("O"));
+
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? ReadEntry(reader) : null;
+    }
+
+    public AttendanceLogEntry? GetLatestClockInToday(string terminalUserId)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT EventId, TerminalUserId, EventType, Timestamp, ExpectedBackUtc, Reason
+            FROM attendance_log
+            WHERE TerminalUserId = $id AND Timestamp >= $start AND EventType = 'CLOCK_IN'
             ORDER BY Timestamp DESC
             LIMIT 1;
             """;
@@ -197,7 +274,7 @@ public class LocalAttendanceStore
 
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT EventId, TerminalUserId, EventType, Timestamp
+            SELECT EventId, TerminalUserId, EventType, Timestamp, ExpectedBackUtc, Reason
             FROM attendance_log
             WHERE Timestamp >= $from AND Timestamp < $to
             ORDER BY Timestamp ASC;
@@ -224,5 +301,7 @@ public class LocalAttendanceStore
         reader.GetString(0),
         reader.GetString(1),
         reader.GetString(2),
-        DateTime.Parse(reader.GetString(3), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind));
+        DateTime.Parse(reader.GetString(3), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+        reader.IsDBNull(4) ? null : DateTime.Parse(reader.GetString(4), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+        reader.IsDBNull(5) ? null : reader.GetString(5));
 }

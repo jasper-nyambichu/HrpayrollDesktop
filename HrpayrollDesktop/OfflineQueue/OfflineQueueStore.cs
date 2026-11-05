@@ -1,4 +1,4 @@
-﻿using Microsoft.Data.Sqlite;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
@@ -49,6 +49,8 @@ public class OfflineQueueStore
         EnsureColumn(connection, "queued_events", "Status", "Status TEXT NOT NULL DEFAULT 'PENDING'");
         EnsureColumn(connection, "queued_events", "NextAttemptAt", "NextAttemptAt TEXT");
         EnsureColumn(connection, "queued_events", "RejectedAt", "RejectedAt TEXT");
+        EnsureColumn(connection, "queued_events", "ExpectedBackUtc", "ExpectedBackUtc TEXT");
+        EnsureColumn(connection, "queued_events", "Reason", "Reason TEXT");
 
         _logger.LogInformation("Offline queue initialized at {ConnectionString}", _connectionString);
     }
@@ -86,9 +88,9 @@ public class OfflineQueueStore
         var command = connection.CreateCommand();
         command.CommandText = """
             INSERT OR IGNORE INTO queued_events
-                (EventId, TerminalUserId, Timestamp, VerifyMethod, EventType, CreatedAt, Status)
+                (EventId, TerminalUserId, Timestamp, VerifyMethod, EventType, CreatedAt, Status, ExpectedBackUtc, Reason)
             VALUES
-                ($eventId, $terminalUserId, $timestamp, $verifyMethod, $eventType, $createdAt, 'PENDING');
+                ($eventId, $terminalUserId, $timestamp, $verifyMethod, $eventType, $createdAt, 'PENDING', $expectedBack, $reason);
             """;
         command.Parameters.AddWithValue("$eventId", evt.EventId);
         command.Parameters.AddWithValue("$terminalUserId", evt.TerminalUserId);
@@ -96,6 +98,8 @@ public class OfflineQueueStore
         command.Parameters.AddWithValue("$verifyMethod", evt.VerifyMethod);
         command.Parameters.AddWithValue("$eventType", evt.EventType);
         command.Parameters.AddWithValue("$createdAt", DateTime.UtcNow.ToString("O"));
+        command.Parameters.AddWithValue("$expectedBack", evt.ExpectedBackUtc is { } back ? back.ToUniversalTime().ToString("O") : DBNull.Value);
+        command.Parameters.AddWithValue("$reason", (object?)evt.Reason ?? DBNull.Value);
         command.ExecuteNonQuery();
     }
 
@@ -108,7 +112,7 @@ public class OfflineQueueStore
 
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT Id, EventId, TerminalUserId, Timestamp, VerifyMethod, EventType, Attempts, LastError, CreatedAt
+            SELECT Id, EventId, TerminalUserId, Timestamp, VerifyMethod, EventType, Attempts, LastError, CreatedAt, ExpectedBackUtc, Reason
             FROM queued_events
             WHERE Status = 'PENDING'
               AND (NextAttemptAt IS NULL OR NextAttemptAt <= $now)
@@ -121,6 +125,22 @@ public class OfflineQueueStore
         return ReadEvents(command);
     }
 
+    /// <summary>Every scan still on its way to the server, including those backing off.</summary>
+    public HashSet<string> GetUnsentEventIds()
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT EventId FROM queued_events WHERE Status = 'PENDING';";
+
+        var ids = new HashSet<string>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            ids.Add(reader.GetString(0));
+        return ids;
+    }
+
     public List<QueuedEvent> GetRejected(int maxCount = 50)
     {
         using var connection = new SqliteConnection(_connectionString);
@@ -128,7 +148,7 @@ public class OfflineQueueStore
 
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT Id, EventId, TerminalUserId, Timestamp, VerifyMethod, EventType, Attempts, LastError, CreatedAt
+            SELECT Id, EventId, TerminalUserId, Timestamp, VerifyMethod, EventType, Attempts, LastError, CreatedAt, ExpectedBackUtc, Reason
             FROM queued_events
             WHERE Status = 'REJECTED'
             ORDER BY CreatedAt DESC
@@ -156,6 +176,8 @@ public class OfflineQueueStore
                 Attempts = reader.GetInt32(6),
                 LastError = reader.IsDBNull(7) ? null : reader.GetString(7),
                 CreatedAt = DateTime.Parse(reader.GetString(8)),
+                ExpectedBackUtc = reader.IsDBNull(9) ? null : DateTime.Parse(reader.GetString(9), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                Reason = reader.IsDBNull(10) ? null : reader.GetString(10),
             });
         }
 
@@ -295,4 +317,6 @@ public class QueuedEvent
     public int Attempts { get; set; }
     public string? LastError { get; set; }
     public DateTime CreatedAt { get; set; }
+    public DateTime? ExpectedBackUtc { get; set; }
+    public string? Reason { get; set; }
 }

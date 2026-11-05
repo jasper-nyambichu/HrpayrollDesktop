@@ -28,6 +28,28 @@ public interface ITerminalAdapter
     Task<IReadOnlyList<TerminalEvent>> PollEventsAsync(CancellationToken cancellationToken);
     Task<bool> EnrollAsync(string terminalUserId, CancellationToken cancellationToken);
     Task RemoveEnrollmentAsync(string terminalUserId);
+
+    /// <summary>The stored template of one person, or null if this PC has none.</summary>
+    byte[]? GetTemplate(string terminalUserId);
+
+    /// <summary>Templates this PC holds that the company database has not confirmed having.</summary>
+    IReadOnlyList<KeyValuePair<string, byte[]>> GetTemplatesNotBackedUp();
+
+    Task MarkBackedUpAsync(string terminalUserId);
+
+    /// <summary>
+    /// Makes this PC match the server: adds and updates the given fingerprints, and removes those of anyone no
+    /// longer on the roster. A template the server has not confirmed having is kept, as it may be the only copy.
+    /// </summary>
+    Task<FingerprintSyncSummary> ApplyServerFingerprintsAsync(
+        IReadOnlyCollection<ServerFingerprint> fingerprints, IReadOnlyCollection<long> roster, CancellationToken cancellationToken);
+}
+
+public record ServerFingerprint(string TerminalUserId, long EmployeeId, byte[] Template);
+
+public record FingerprintSyncSummary(int Added, int Updated, int Removed)
+{
+    public bool Changed => Added + Updated + Removed > 0;
 }
 
 public record TerminalEvent(

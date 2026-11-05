@@ -95,7 +95,7 @@ public partial class DaysWorkedView : UserControl
 
         if (_branchId is not long branchId)
         {
-            SetEmpty("Choose a branch first — sign in again and pick the branch this terminal serves.");
+            SetEmpty("This account isn't assigned to a branch yet. Ask your administrator.");
             return;
         }
 
@@ -236,12 +236,12 @@ public partial class DaysWorkedView : UserControl
             .Select(r => new DaysWorkedAdjustmentBody(r.EmployeeId, r.Value, r.Reason.Trim()))
             .ToList();
 
-        var answer = System.Windows.MessageBox.Show(
-            Window.GetWindow(this),
-            $"Lock the days for {_rows.Count} employees ({_loadedStart} to {_loadedEnd})?\n\n" +
+        if (PopupHost.Current is not { } popups) return;
+        var yes = await popups.ConfirmAsync("Lock days worked?",
+            $"Lock the days for {_rows.Count} employees ({_loadedStart} to {_loadedEnd})? " +
             "Payroll will use these figures. Only an Administrator can reopen the period afterwards.",
-            "Lock days worked", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
-        if (answer != MessageBoxResult.Yes) return;
+            "Yes, lock them");
+        if (!yes) return;
 
         var done = false;
         _busy = true;
@@ -290,8 +290,8 @@ public partial class DaysWorkedView : UserControl
 /// <summary>One employee's row: the days figure and reason are editable until the period is locked.</summary>
 internal sealed class DaysRowVm : INotifyPropertyChanged
 {
-    private static readonly Brush NormalBg = Frozen("#F1F5F6");
-    private static readonly Brush ErrorBg = Frozen("#FDE8E4");
+    private static readonly Brush NormalBg = Frozen("#F0F4F8");
+    private static readonly Brush ErrorBg = Frozen("#FFDAD6");
     private static readonly Brush LockedBg = Frozen("#E7EEEF");
 
     private readonly DaysWorkedItem _item;

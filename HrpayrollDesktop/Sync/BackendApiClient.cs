@@ -1,4 +1,4 @@
-﻿using HrpayrollDesktop.Auth;
+using HrpayrollDesktop.Auth;
 using HrpayrollDesktop.Config;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -16,15 +16,20 @@ namespace HrpayrollDesktop.Sync;
 
 public class BackendApiClient
 {
+    // The console enrols one finger per employee.
+    private const short PrimaryFingerSlot = 1;
+
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _httpClient;
     private readonly ILogger<BackendApiClient> _logger;
+    private readonly StaffTokenStore _staffTokens;
     private DeviceIdentity? _deviceIdentity;
 
-    public BackendApiClient(HttpClient httpClient, IOptions<AgentSettings> settings, ILogger<BackendApiClient> logger)
+    public BackendApiClient(HttpClient httpClient, IOptions<AgentSettings> settings, ILogger<BackendApiClient> logger, StaffTokenStore staffTokens)
     {
         _logger = logger;
+        _staffTokens = staffTokens;
         httpClient.BaseAddress = new Uri(settings.Value.BackendBaseUrl);
         httpClient.Timeout = TimeSpan.FromSeconds(20);   // an unreachable server must not block sync for minutes
         httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -52,6 +57,11 @@ public class BackendApiClient
 
     // ------------------------------------------------------------------ manager (JWT) calls
 
+    /// <summary>Keeps this sign-in alive past the server's 15 minute token while the console is open.</summary>
+    public void BeginStaffSession(AuthResponse session) => _staffTokens.Set(session);
+
+    public void EndStaffSession() => _staffTokens.Clear();
+
     public async Task<LoginResult> LoginAsync(string username, string password, CancellationToken cancellationToken)
     {
         var request = new LoginRequest(username, password);
@@ -61,7 +71,16 @@ public class BackendApiClient
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning("Login failed: {StatusCode} {Body}", response.StatusCode, body);
-            return LoginResult.Failure("Invalid username or password.");
+
+            // Only a real refusal of the credentials may blame them. A server or tunnel fault says so instead.
+            var (fromBackend, message) = ReadBackendError(body);
+            return LoginResult.Failure((int)response.StatusCode switch
+            {
+                401 => "Invalid username or password.",
+                >= 500 => "The server isn't available right now. Your username and password were not checked. Please try again shortly.",
+                _ when fromBackend => FriendlyMessages.Translate(message),
+                _ => "The server isn't available right now. Your username and password were not checked. Please try again shortly.",
+            });
         }
 
         var envelope = JsonSerializer.Deserialize<ApiResponse<AuthResponse>>(body, WebJson);
@@ -75,7 +94,8 @@ public class BackendApiClient
         return LoginResult.Ok(envelope.Data);
     }
 
-    public async Task<List<EmployeeSummary>> GetEmployeesByBranchAsync(long branchId, string staffAccessToken, CancellationToken cancellationToken)
+    /// <summary>Everyone at the branch. Null when it can't be loaded, so that is never mistaken for an empty branch.</summary>
+    public async Task<List<EmployeeSummary>?> GetEmployeesByBranchAsync(long branchId, string staffAccessToken, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, $"/employees/by-branch/{branchId}");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", staffAccessToken);
@@ -86,17 +106,19 @@ public class BackendApiClient
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning("Failed to load employees for branch {BranchId}: {StatusCode} {Body}", branchId, response.StatusCode, body);
-            return new List<EmployeeSummary>();
+            return null;
         }
 
         var envelope = JsonSerializer.Deserialize<ApiResponse<List<EmployeeSummary>>>(body, WebJson);
-        return envelope?.Data ?? new List<EmployeeSummary>();
+        return envelope?.Data;
     }
 
-    public async Task<List<AttendanceRecord>> GetTodayAttendanceForBranchAsync(long branchId, string staffAccessToken, CancellationToken cancellationToken)
+    /// <summary>
+    /// What was recorded at this branch over the period, from every reader it has. Null when it can't be loaded.
+    /// </summary>
+    public async Task<List<AttendanceRecord>?> GetBranchAttendanceAsync(long branchId, DateTime from, DateTime to, string staffAccessToken, CancellationToken cancellationToken)
     {
-        var today = DateTime.Now.ToString("yyyy-MM-dd");
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"/attendance/branch/{branchId}?start={today}&end={today}");
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/attendance/branch/{branchId}?start={from:yyyy-MM-dd}&end={to:yyyy-MM-dd}");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", staffAccessToken);
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
@@ -104,39 +126,67 @@ public class BackendApiClient
 
         if (!response.IsSuccessStatusCode)
         {
-            _logger.LogWarning("Failed to load today's attendance for branch {BranchId}: {StatusCode} {Body}", branchId, response.StatusCode, body);
-            return new List<AttendanceRecord>();
+            _logger.LogWarning("Failed to load attendance for branch {BranchId}: {StatusCode} {Body}", branchId, response.StatusCode, body);
+            return null;
         }
 
         var envelope = JsonSerializer.Deserialize<ApiResponse<List<AttendanceRecord>>>(body, WebJson);
-        return envelope?.Data ?? new List<AttendanceRecord>();
+        return envelope?.Data;
     }
 
-    public async Task<SyncResult> RegisterEnrollmentAsync(long employeeId, string terminalUserId, string staffAccessToken, CancellationToken cancellationToken)
+    /// <summary>
+    /// Lunch breaks and temporary check-outs recorded at this branch on one day, with who was late. Null when they can't be loaded.
+    /// </summary>
+    public async Task<List<AttendanceDayRecord>?> GetBranchDayRecordsAsync(long branchId, DateTime day, string staffAccessToken, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            $"/attendance/dashboard/records?branchId={branchId}&start={day:yyyy-MM-dd}&end={day:yyyy-MM-dd}&size=200");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", staffAccessToken);
+
+        var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode) return null;
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        return JsonSerializer.Deserialize<ApiResponse<AttendanceDayPage>>(body, WebJson)?.Data?.Content;
+    }
+
+    /// <summary>
+    /// Saves a finger to the company database and links the terminal id to the employee in one step, so every
+    /// branch PC can recognise them after a move. Also used to back up a template this PC already holds.
+    /// </summary>
+    public Task<SyncResult> SaveFingerprintAsync(long employeeId, string terminalUserId, byte[] template, string staffAccessToken, CancellationToken cancellationToken)
     {
         if (_deviceIdentity is null)
-            throw new InvalidOperationException("Cannot register enrollment: device credentials have not been configured.");
+            throw new InvalidOperationException("Cannot save the fingerprint: device credentials have not been configured.");
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/attendance/enrollment");
+        return SendStaffAsync(HttpMethod.Post, "/attendance/enrollment/fingerprints", staffAccessToken,
+            new FingerprintSaveBody(employeeId, _deviceIdentity.Serial, terminalUserId, PrimaryFingerSlot, Convert.ToBase64String(template), null),
+            cancellationToken);
+    }
+
+    /// <summary>The readers registered to a branch. Null when the list can't be loaded.</summary>
+    public async Task<List<BranchDevice>?> GetDevicesByBranchAsync(long branchId, string staffAccessToken, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/attendance/devices/by-branch/{branchId}");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", staffAccessToken);
-        request.Content = JsonContent.Create(new EnrollmentRequest(employeeId, _deviceIdentity.Serial, terminalUserId));
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)
         {
-            _logger.LogWarning("Enrollment mapping push failed for employeeId={EmployeeId}: {StatusCode} {Body}", employeeId, response.StatusCode, body);
-            var (fromBackend, message) = ReadBackendError(body);
-            return SyncResult.Failure(message, (int)response.StatusCode, fromBackend);
+            _logger.LogWarning("Failed to load the branch's readers: {StatusCode} {Body}", (int)response.StatusCode, body);
+            return null;
         }
 
-        return SyncResult.Ok();
+        var envelope = JsonSerializer.Deserialize<ApiResponse<List<BranchDevice>>>(body, WebJson);
+        return envelope?.Data;
     }
 
     // ------------------------------------------------------------------ device-token calls
 
-    public async Task<SyncResult> SyncEventAsync(string eventId, string terminalUserId, DateTime timestamp, string verifyMethod, string eventType, CancellationToken cancellationToken)
+    public async Task<SyncResult> SyncEventAsync(string eventId, string terminalUserId, DateTime timestamp, string verifyMethod, string eventType,
+        DateTime? expectedBackUtc, string? reason, CancellationToken cancellationToken)
     {
         if (_deviceIdentity is null)
             throw new InvalidOperationException("Cannot sync: device credentials have not been configured. Call ConfigureDeviceCredentials first.");
@@ -148,7 +198,9 @@ public class BackendApiClient
             Timestamp: timestamp,                           // PC wall-clock time (older backends use this)
             VerifyMethod: verifyMethod,
             EventType: eventType,
-            TimestampUtc: timestamp.ToUniversalTime()       // exact instant; the server converts it to company time
+            TimestampUtc: timestamp.ToUniversalTime(),      // exact instant; the server converts it to company time
+            ExpectedBackAtUtc: expectedBackUtc?.ToUniversalTime(),
+            Reason: reason
         );
 
         var response = await _httpClient.PostAsJsonAsync("/attendance/biometric/sync", request, cancellationToken);
@@ -194,29 +246,33 @@ public class BackendApiClient
         return envelope?.Data;
     }
 
-    // ------------------------------------------------------------------ back office: damages (JWT)
-
-    /// <summary>Active branches (the Back Office works across all of them). Null when the server can't be reached.</summary>
-    public async Task<List<BranchOption>?> GetBranchesAsync(string staffAccessToken, CancellationToken cancellationToken)
+    /// <summary>
+    /// The fingerprints of everyone who works at this reader's branch right now, plus the whole roster. This is
+    /// how a moved employee reaches their new branch's reader. Null when the server can't be asked.
+    /// </summary>
+    public async Task<FingerprintSyncBundle?> GetFingerprintsAsync(CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/branches");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", staffAccessToken);
+        if (_deviceIdentity is null) return null;
 
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/attendance/biometric/fingerprints");
         var response = await _httpClient.SendAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)
         {
-            _logger.LogWarning("Failed to load branches: {StatusCode} {Body}", (int)response.StatusCode, body);
+            var (_, message) = ReadBackendError(body);
+            _logger.LogWarning("Could not load fingerprints: {StatusCode} {Message}", (int)response.StatusCode, message);
             return null;
         }
 
-        var envelope = JsonSerializer.Deserialize<ApiResponse<List<BranchOption>>>(body, WebJson);
+        var envelope = JsonSerializer.Deserialize<ApiResponse<FingerprintSyncBundle>>(body, WebJson);
         return envelope?.Data;
     }
 
+    // ------------------------------------------------------------------ back office: damages (JWT)
+
     /// <summary>
-    /// Registers this reader for a branch. Back Office or Administrator. The token in the result is shown
+    /// Registers this reader for the signed-in Back Office's branch. The token in the result is shown
     /// once by the server, so the caller must save it immediately. Error is the server's message.
     /// </summary>
     public async Task<(DeviceRegistration? Registration, string? Error)> RegisterDeviceAsync(
@@ -394,10 +450,11 @@ public record SyncEventRequest(
     [property: JsonConverter(typeof(LocalDateTimeJsonConverter))] DateTime Timestamp,
     string VerifyMethod,
     string EventType,
-    DateTime TimestampUtc
+    DateTime TimestampUtc,
+    DateTime? ExpectedBackAtUtc,
+    string? Reason
 );
 
-public record EnrollmentRequest(long EmployeeId, string DeviceSerial, string TerminalUserId);
 public record ApiResponse<T>(bool Success, string? Message, T? Data, DateTime Timestamp);
 
 public record DeviceMapping(

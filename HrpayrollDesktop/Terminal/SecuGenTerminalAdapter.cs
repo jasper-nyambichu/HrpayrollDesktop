@@ -37,6 +37,12 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
     private static readonly string TemplateStorePath =
         Path.Combine(AppContext.BaseDirectory, "enrolled-templates.json");
 
+    // Which of those templates the company database is known to hold.
+    private static readonly string BackedUpStorePath =
+        Path.Combine(AppContext.BaseDirectory, "backed-up-templates.json");
+
+    private const string TerminalIdPrefix = "emp-";
+
     private enum TouchState { Idle, WaitingForRemoval }
 
     private readonly ILogger<SecuGenTerminalAdapter> _logger;
@@ -45,6 +51,7 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
     private int _imageHeight;
 
     private Dictionary<string, byte[]> _templates = new();
+    private HashSet<string> _backedUp = new();
     private readonly object _templateSync = new();
 
     // Guards every SDK call. All touch-state fields below are only touched while holding it.
@@ -103,7 +110,7 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
             {
                 _imageWidth = info.ImageWidth;
                 _imageHeight = info.ImageHeight;
-                _deviceSerial = Encoding.ASCII.GetString(info.DeviceSN).TrimEnd('\0');
+                _deviceSerial = Encoding.ASCII.GetString(info.DeviceSN).Trim('\0', ' ');
                 _logger.LogInformation("SecuGen device connected. Serial={Serial}, {Width}x{Height}",
                     _deviceSerial, _imageWidth, _imageHeight);
             }
@@ -349,7 +356,9 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
             lock (_templateSync)
             {
                 _templates[terminalUserId] = template;
+                _backedUp.Remove(terminalUserId);   // a new capture: the server's copy is now out of date
                 SaveTemplates();
+                SaveBackedUp();
             }
 
             // The enrolled finger is usually still on the glass: remember it so it isn't scanned as a clock-in.
@@ -374,7 +383,9 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
             {
                 if (_templates.Remove(terminalUserId))
                 {
+                    _backedUp.Remove(terminalUserId);
                     SaveTemplates();
+                    SaveBackedUp();
                     _logger.LogWarning("Rolled back local enrollment for terminalUserId={TerminalUserId} after backend registration failure.", terminalUserId);
                 }
             }
@@ -383,6 +394,94 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
         {
             _deviceLock.Release();
         }
+    }
+
+    public byte[]? GetTemplate(string terminalUserId)
+    {
+        lock (_templateSync) return _templates.GetValueOrDefault(terminalUserId);
+    }
+
+    public IReadOnlyList<KeyValuePair<string, byte[]>> GetTemplatesNotBackedUp()
+    {
+        lock (_templateSync) return _templates.Where(kv => !_backedUp.Contains(kv.Key)).ToList();
+    }
+
+    public async Task MarkBackedUpAsync(string terminalUserId)
+    {
+        await _deviceLock.WaitAsync();
+        try
+        {
+            lock (_templateSync)
+            {
+                if (_templates.ContainsKey(terminalUserId) && _backedUp.Add(terminalUserId))
+                    SaveBackedUp();
+            }
+        }
+        finally
+        {
+            _deviceLock.Release();
+        }
+    }
+
+    public async Task<FingerprintSyncSummary> ApplyServerFingerprintsAsync(
+        IReadOnlyCollection<ServerFingerprint> fingerprints, IReadOnlyCollection<long> roster, CancellationToken cancellationToken)
+    {
+        // Matching walks the templates while holding this lock, so they must not change underneath it.
+        await _deviceLock.WaitAsync(cancellationToken);
+        try
+        {
+            lock (_templateSync)
+            {
+                int added = 0, updated = 0, removed = 0;
+                var backedUpChanged = false;
+                var onServer = new HashSet<string>();
+                var stillHere = roster.ToHashSet();
+
+                foreach (var fingerprint in fingerprints)
+                {
+                    onServer.Add(fingerprint.TerminalUserId);
+                    backedUpChanged |= _backedUp.Add(fingerprint.TerminalUserId);
+
+                    if (!_templates.TryGetValue(fingerprint.TerminalUserId, out var current))
+                    {
+                        _templates[fingerprint.TerminalUserId] = fingerprint.Template;
+                        added++;
+                    }
+                    else if (!current.AsSpan().SequenceEqual(fingerprint.Template))
+                    {
+                        _templates[fingerprint.TerminalUserId] = fingerprint.Template;
+                        updated++;
+                    }
+                }
+
+                foreach (var terminalUserId in _templates.Keys.ToList())
+                {
+                    if (onServer.Contains(terminalUserId) || !_backedUp.Contains(terminalUserId)) continue;
+                    if (TryGetEmployeeId(terminalUserId, out var employeeId) && stillHere.Contains(employeeId)) continue;
+
+                    _templates.Remove(terminalUserId);
+                    _backedUp.Remove(terminalUserId);
+                    backedUpChanged = true;
+                    removed++;
+                }
+
+                if (added + updated + removed > 0) SaveTemplates();
+                if (backedUpChanged) SaveBackedUp();
+
+                return new FingerprintSyncSummary(added, updated, removed);
+            }
+        }
+        finally
+        {
+            _deviceLock.Release();
+        }
+    }
+
+    private static bool TryGetEmployeeId(string terminalUserId, out long employeeId)
+    {
+        employeeId = 0;
+        return terminalUserId.StartsWith(TerminalIdPrefix, StringComparison.Ordinal)
+               && long.TryParse(terminalUserId.AsSpan(TerminalIdPrefix.Length), out employeeId);
     }
 
     // ----- Helpers -----
@@ -406,6 +505,9 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
         if (_fpm is null) return null;
 
         var error = _fpm.GetImage(image);
+
+        // The SDU03P answers this for empty glass, so a lifted finger has to count as "nothing there".
+        if (error == (int)SGFPMError.ERROR_WRONG_IMAGE) return 0;
         if (error != (int)SGFPMError.ERROR_NONE) return null;
 
         var quality = 0;
@@ -503,6 +605,8 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
 
     private void LoadTemplates()
     {
+        LoadBackedUp();
+
         if (!File.Exists(TemplateStorePath))
         {
             lock (_templateSync) _templates = new Dictionary<string, byte[]>();
@@ -531,6 +635,25 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
         var json = JsonSerializer.Serialize(toStore, new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(TemplateStorePath, json);
     }
+
+    private void LoadBackedUp()
+    {
+        var loaded = new HashSet<string>();
+        try
+        {
+            if (File.Exists(BackedUpStorePath))
+                loaded = JsonSerializer.Deserialize<HashSet<string>>(File.ReadAllText(BackedUpStorePath)) ?? loaded;
+        }
+        catch (Exception ex)
+        {
+            // Safe to lose: everything simply counts as not backed up, so nothing gets deleted.
+            _logger.LogWarning(ex, "Could not read {Path}; templates will be backed up again.", BackedUpStorePath);
+        }
+        lock (_templateSync) _backedUp = loaded;
+    }
+
+    // Caller must hold _templateSync.
+    private void SaveBackedUp() => File.WriteAllText(BackedUpStorePath, JsonSerializer.Serialize(_backedUp));
 
     public void Dispose()
     {

@@ -14,6 +14,9 @@ public static class FriendlyMessages
 
         return text switch
         {
+            var t when t.Contains("Fingerprint storage is not set up") => "Fingerprints can't be saved until the server is set up for them. Contact your administrator.",
+            var t when t.Contains("does not belong to the branch") => "This employee doesn't work at the branch this reader belongs to.",
+            var t when t.Contains("own branch's device") => "This reader belongs to a different branch. Use your own branch's computer.",
             var t when t.Contains("already mapped") => "This employee is already enrolled on this device.",
             var t when t.Contains("Employee not found") => "That employee could not be found. Please refresh the list and try again.",
             var t when t.Contains("No employee mapped") => "This fingerprint isn't linked to anyone yet. Please enroll this employee first.",

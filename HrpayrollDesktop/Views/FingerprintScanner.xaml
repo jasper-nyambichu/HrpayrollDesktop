@@ -1,0 +1,78 @@
+<UserControl x:Class="HrpayrollDesktop.FingerprintScanner"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- A glowing fingerprint drawn as vectors (after the neon reference image), so it is sharp at any size.
+         The ridges are built in code; this file only stacks the layers. -->
+    <Viewbox Stretch="Uniform">
+        <Grid Width="262" Height="262">
+            <!-- Soft light behind the print -->
+            <Ellipse x:Name="Halo" Width="262" Height="262" IsHitTestVisible="False">
+                <Ellipse.Fill>
+                    <RadialGradientBrush>
+                        <GradientStop x:Name="HaloInner" Color="#6022D3EE" Offset="0"/>
+                        <GradientStop x:Name="HaloMid" Color="#1A1D6FE0" Offset="0.62"/>
+                        <GradientStop Color="#001D6FE0" Offset="1"/>
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+
+            <!-- Rings that ripple out while waiting for, or reading, a finger -->
+            <Ellipse x:Name="RippleA" Width="236" Height="236" StrokeThickness="2" Opacity="0" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+                <Ellipse.Stroke><SolidColorBrush x:Name="RippleBrushA" Color="#22D3EE"/></Ellipse.Stroke>
+                <Ellipse.RenderTransform><ScaleTransform x:Name="RippleScaleA"/></Ellipse.RenderTransform>
+            </Ellipse>
+            <Ellipse x:Name="RippleB" Width="236" Height="236" StrokeThickness="2" Opacity="0" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+                <Ellipse.Stroke><SolidColorBrush x:Name="RippleBrushB" Color="#22D3EE"/></Ellipse.Stroke>
+                <Ellipse.RenderTransform><ScaleTransform x:Name="RippleScaleB"/></Ellipse.RenderTransform>
+            </Ellipse>
+
+            <!-- The print, and a brighter copy that lights up under the scan line -->
+            <Grid Width="220" Height="220" IsHitTestVisible="False">
+                <Grid.RenderTransform><TranslateTransform x:Name="Shake"/></Grid.RenderTransform>
+                <Path x:Name="Ridges" StrokeThickness="4.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round">
+                    <Path.Effect>
+                        <DropShadowEffect x:Name="RidgeGlow" Color="#22D3EE" BlurRadius="14" ShadowDepth="0" Opacity="0.45"/>
+                    </Path.Effect>
+                </Path>
+                <Path x:Name="RidgesLit" StrokeThickness="4.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Opacity="0.9">
+                    <Path.Stroke><SolidColorBrush x:Name="LitBrush" Color="#7FE9FF"/></Path.Stroke>
+                    <Path.OpacityMask>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop x:Name="MaskA" Color="#00FFFFFF" Offset="-0.3"/>
+                            <GradientStop x:Name="MaskB" Color="#FFFFFFFF" Offset="-0.1"/>
+                            <GradientStop x:Name="MaskC" Color="#00FFFFFF" Offset="-0.08"/>
+                        </LinearGradientBrush>
+                    </Path.OpacityMask>
+                </Path>
+
+                <!-- The scan line itself -->
+                <Canvas ClipToBounds="True">
+                    <Canvas.Clip><EllipseGeometry Center="110,110" RadiusX="108" RadiusY="108"/></Canvas.Clip>
+                    <Rectangle x:Name="ScanLine" Width="220" Height="3" Opacity="0">
+                        <Rectangle.Fill>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                <GradientStop Color="#0067E8F9" Offset="0"/>
+                                <GradientStop x:Name="ScanLineCore" Color="#FF22D3EE" Offset="0.5"/>
+                                <GradientStop Color="#0067E8F9" Offset="1"/>
+                            </LinearGradientBrush>
+                        </Rectangle.Fill>
+                        <Rectangle.Effect>
+                            <DropShadowEffect x:Name="ScanLineGlow" Color="#22D3EE" BlurRadius="18" ShadowDepth="0" Opacity="1"/>
+                        </Rectangle.Effect>
+                        <Rectangle.RenderTransform><TranslateTransform x:Name="ScanLineMove"/></Rectangle.RenderTransform>
+                    </Rectangle>
+                </Canvas>
+            </Grid>
+
+            <!-- Shown for a moment after a scan -->
+            <Grid x:Name="Badge" Width="64" Height="64" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,14,14"
+                  Opacity="0" IsHitTestVisible="False" RenderTransformOrigin="0.5,0.5">
+                <Grid.RenderTransform><ScaleTransform x:Name="BadgeScale"/></Grid.RenderTransform>
+                <Ellipse x:Name="BadgeDot" Fill="#10B981">
+                    <Ellipse.Effect><DropShadowEffect x:Name="BadgeGlow" Color="#10B981" BlurRadius="20" ShadowDepth="0" Opacity="0.9"/></Ellipse.Effect>
+                </Ellipse>
+                <TextBlock x:Name="BadgeIcon" Text="&#xE5CA;" Style="{StaticResource Icon}" FontSize="38" Foreground="White" HorizontalAlignment="Center"/>
+            </Grid>
+        </Grid>
+    </Viewbox>
+</UserControl>

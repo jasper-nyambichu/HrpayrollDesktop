@@ -677,7 +677,7 @@
                                         <Run FontWeight="SemiBold" Text="Scanning at the reader"/><LineBreak/>
                                         <Run Text="No login is needed. The first scan of the day clocks an employee in. The next scan asks where they are going: a lunch break, a temporary check-out, or home for the day. Scanning again brings them back from a break."/><LineBreak/><LineBreak/>
                                         <Run FontWeight="SemiBold" Text="Lunch breaks and temporary check-outs"/><LineBreak/>
-                                        <Run Text="Lunch allows 30 minutes, and coming back later is recorded as late. A temporary check-out records the reason and return time, and is never counted as late."/><LineBreak/><LineBreak/>
+                                        <Run Text="Lunch allows 30 minutes, and coming back later is recorded as late. A temporary check-out records the reason and the minutes the employee typed, and is never counted as late. With no internet, scans are saved on this PC and sent when it is back; the home screen's Sync status shows anything the server refused, and why."/><LineBreak/><LineBreak/>
                                         <Run FontWeight="SemiBold" Text="Reading the Time log"/><LineBreak/>
                                         <Run Text="Every employee on the branch is listed. IN = at work, AT LUNCH or OUT TEMPORARILY = on a break, OUT = finished, NOT IN YET = has not reported, NOT ENROLLED = no fingerprint yet. The Breaks column shows lateness and reasons. Hover a row to see every scan."/><LineBreak/><LineBreak/>
                                         <Run FontWeight="SemiBold" Text="Enrolling someone"/><LineBreak/>

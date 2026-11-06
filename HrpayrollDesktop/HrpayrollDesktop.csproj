@@ -11,6 +11,12 @@
     <PlatformTarget>x64</PlatformTarget>
     <AssemblyName>HrpayrollDesktop</AssemblyName>
     <ApplicationIcon>Assets\dhwarsh.ico</ApplicationIcon>
+
+    <!-- Shown in Windows' installed apps list. Raise Version for every installer you hand out. -->
+    <Version>1.3.2</Version>
+    <Company>Dhwarsh</Company>
+    <Product>Dhwarsh HR Attendance</Product>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>

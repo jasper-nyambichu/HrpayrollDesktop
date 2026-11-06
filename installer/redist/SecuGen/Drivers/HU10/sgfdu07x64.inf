@@ -1,0 +1,116 @@
+;
+; Installation file (.inf) for the SecuGen FDU07(U10) fingerprint devices.
+;
+; (c) Copyright 2017-2025 SecuGen Corp. 
+
+[Version]
+Signature="$Windows NT$"
+Provider=%SecuGen%
+Class=%FingerprintClassName%
+ClassGuid={BDE46A98-A497-4034-B7C3-9432E59CCB39}
+
+DriverVer=11/21/2025, 1.1.4.1
+CatalogFile.NT=sgfdu07x64.cat
+PnpLockdown=1
+
+[ClassInstall32]
+Addreg=FingerprintClassReg
+
+[FingerprintClassReg]
+HKR,,,0,%FingerprintClassName%
+HKR,,Icon,,-20
+
+[SourceDisksNames]
+1 = %DISK1%,,,
+
+[SourceDisksFiles]
+sgfdu07x64.sys=1,,
+sgfdu07x64.dll=1,,
+sgfdu07m.dll=1,,
+sgfdu07mlp.dat=1,,
+sgfdu07mlp.lic=1,,
+
+[DestinationDirs]
+DefaultDestDir=10,System32\Drivers
+SGFDU07.Files.Ext = 10,System32\Drivers
+SGFDU07.Files.Dll = 11			; 9x - System Dir, NT - System32 Dir
+SGFDU07.Files.Dat = 10							; Windows directory
+SGFDU07.Files.Dll.Wow64 = 10, SysWow64			; Windows\SysWow64
+
+[ControlFlags]
+;ExcludeFromSelect=*             ; removes all device here from the device installer list
+
+[Manufacturer]
+%SecuGen%=SecuGen, NTamd64
+
+[SecuGen.NTamd64]
+;-------------------------------------------------------------------------------------
+; FDU07, SecuGen USB U10 Sensor Fingerprint device, November 2025
+;-------------------------------------------------------------------------------------
+%USB\VID_1162&PID_2203.DeviceDesc%=SGFDU07.NT, USB\VID_1162&PID_2203
+%USB\VID_1162&PID_2213.DeviceDesc%=SGFDU07.NT, USB\VID_1162&PID_2213
+%USB\VID_1162&PID_2313.DeviceDesc%=SGFDU07.NT, USB\VID_1162&PID_2313
+
+; ------------- File lists -------------
+
+[SGFDU07.Files.Ext]
+sgfdu07x64.sys
+
+[SGFDU07.Files.Dll]
+sgfdu07x64.dll
+
+[SGFDU07.Files.Dat]
+sgfdu07mlp.dat
+sgfdu07mlp.lic
+
+[SGFDU07.Files.Dll.WOW64]
+sgfdu07m.dll
+
+;-------------------
+; For Windows NT...
+;-------------------
+; HID
+[SGFPUSBHid.NT]
+Include=input.inf
+Needs=HID_Inst.NT
+
+[SGFPUSBHid.NT.Services]
+Include=input.inf
+Needs=HID_Inst.NT.Services
+
+; composite
+[SGFPUSBComposite.NT]
+Include=usb.inf
+Needs= Composite.Dev.NT
+
+[SGFPUSBComposite.NT.Services]
+Include=usb.inf
+Needs=Composite.Dev.NT.Services
+
+; FRD
+[SGFDU07.NT]
+CopyFiles=SGFDU07.Files.Ext, SGFDU07.Files.Dll, SGFDU07.Files.Dat, SGFDU07.Files.Dll.WOW64
+
+[SGFDU07.NT.Services]
+Addservice = SGFDU07, 0x00000002, SGFDU07_AddService_Inst 
+
+[SGFDU07_AddService_Inst]
+DisplayName    = %SGFDU07.SvcDesc%
+ServiceType    = 1                  ; SERVICE_KERNEL_DRIVER
+StartType      = 1                  ; SERVICE_SYSTEM_START 
+ErrorControl   = 0                  ; SERVICE_ERROR_IGNORE
+LoadOrderGroup = Pointer Port
+ServiceBinary  = %12%\sgfdu07x64.sys
+
+[Strings]
+SecuGen="SecuGen Corporation"
+DISK1="SecuGen Installation Disk"
+SGFDU07.SvcDesc="SecuGen USB FDU07 Service"
+FingerprintClassName="Fingerprint devices"
+USB\VID_1162&PID_2203.DeviceDesc="SecuGen U10 USB FRD"
+USB\VID_1162&PID_2213.DeviceDesc="SecuGen U10 SF FRD"
+USB\VID_1162&PID_2313.DeviceDesc="SecuGen U10 APSF FRD"
+
+
+
+

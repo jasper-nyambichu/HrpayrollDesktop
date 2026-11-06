@@ -3,3 +3,7 @@ bin/
 obj/ 
 *.user 
 *.suo 
+installer/out/
+installer/Output/
+installer/redist/vc_redist.x64.exe
+installer.zip

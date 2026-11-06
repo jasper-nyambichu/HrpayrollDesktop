@@ -246,6 +246,64 @@
         </Setter>
     </Style>
 
+    <!-- ===== The fingerprint scanner panel (after the neon reference image) ===== -->
+    <SolidColorBrush x:Key="CyanBrush" Color="#0891B2"/>
+    <SolidColorBrush x:Key="ScannerInkBrush" Color="#0B2A45"/>
+    <SolidColorBrush x:Key="ScannerMutedBrush" Color="#55657A"/>
+    <SolidColorBrush x:Key="ScannerLineBrush" Color="#D6E4F2"/>
+    <RadialGradientBrush x:Key="ScannerGradient" Center="0.5,0.45" GradientOrigin="0.5,0.45" RadiusX="0.75" RadiusY="0.8">
+        <GradientStop Color="#FFFFFF" Offset="0"/>
+        <GradientStop Color="#F4F9FE" Offset="0.55"/>
+        <GradientStop Color="#E4EFF9" Offset="1"/>
+    </RadialGradientBrush>
+
+    <!-- Glowing outline button on the light scanner panel -->
+    <Style x:Key="NeonBtn" TargetType="Button">
+        <Setter Property="Foreground" Value="#005592"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" CornerRadius="24" Padding="26,12" BorderThickness="1.5" BorderBrush="#1C6EB4" Background="#0F1C6EB4">
+                        <Border.Effect>
+                            <DropShadowEffect Color="#1C6EB4" BlurRadius="16" ShadowDepth="0" Opacity="0.25"/>
+                        </Border.Effect>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="#221C6EB4"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="#3A1C6EB4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- A status pill that opens more detail (the sync state on the home screen) -->
+    <Style x:Key="StatusPillBtn" TargetType="Button">
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="15" Padding="12,7">
+                        <ContentPresenter/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.85"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- "See all" -->
     <Style x:Key="LinkBtn" TargetType="Button">
         <Setter Property="Foreground" Value="{StaticResource BlueBrush}"/>
@@ -285,6 +343,38 @@
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Bd" Property="Background" Value="{StaticResource BlueSoftBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- The eye inside a password field: shows or hides what was typed -->
+    <Style x:Key="RevealBtn" TargetType="Button">
+        <Setter Property="Width" Value="34"/>
+        <Setter Property="Height" Value="34"/>
+        <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="FontSize" Value="19"/>
+        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="HorizontalAlignment" Value="Right"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Margin" Value="0,0,5,0"/>
+        <Setter Property="Content" Value="&#xE8F4;"/>
+        <Setter Property="ToolTip" Value="Show password"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="Transparent" CornerRadius="17">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource BlueSoftBrush}"/>
+                            <Setter Property="Foreground" Value="{StaticResource BlueBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

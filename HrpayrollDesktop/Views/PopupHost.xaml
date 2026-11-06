@@ -1,6 +1,7 @@
 <UserControl x:Class="HrpayrollDesktop.PopupHost"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:HrpayrollDesktop"
              PreviewKeyDown="Root_PreviewKeyDown">
     <UserControl.Resources>
         <!-- The white card every pop-up sits on -->
@@ -57,6 +58,37 @@
                 <TextBlock Grid.Column="2" Text="{Binding Time}" Style="{StaticResource Sub}" VerticalAlignment="Center"/>
             </Grid>
         </DataTemplate>
+
+        <!-- A scan in the sync card: who, what and when, and why it is waiting or was refused -->
+        <DataTemplate x:Key="SyncRowTemplate">
+            <Border Background="{Binding RowBg}" CornerRadius="10" Padding="10,9" Margin="0,0,0,8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Width="32" Height="32" CornerRadius="16" Background="{Binding AvatarBg}" VerticalAlignment="Top">
+                        <TextBlock Text="{Binding Initials}" Foreground="{Binding AvatarFg}" FontSize="11" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel Grid.Column="1" Margin="10,0,8,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Name}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding What}" Style="{StaticResource Sub}" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding Note}" Foreground="{Binding NoteFg}" FontSize="11" FontWeight="Medium" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                    </StackPanel>
+                    <TextBlock Grid.Column="2" Text="{Binding When}" Style="{StaticResource Sub}" VerticalAlignment="Top" TextAlignment="Right"/>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <Style x:Key="SyncStat" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Padding" Value="12,10"/>
+        </Style>
     </UserControl.Resources>
 
     <Grid>
@@ -101,6 +133,85 @@
                     <Button Style="{StaticResource SoftBtn}" Content="Close" Margin="0,8,0,0" Click="ListClose_Click"/>
                 </StackPanel>
             </Border>
+
+            <!-- Sync status: what has reached the server, what is waiting, and what was refused and why -->
+            <Border x:Name="SyncCard" Style="{StaticResource PopupCard}" Width="540" Visibility="Collapsed">
+                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid Width="56" Height="56" VerticalAlignment="Top">
+                            <Ellipse x:Name="SyncHalo"/>
+                            <Ellipse x:Name="SyncDot" Width="38" Height="38"/>
+                            <TextBlock x:Name="SyncIcon" Style="{StaticResource Icon}" FontSize="21" Foreground="White" HorizontalAlignment="Center"/>
+                        </Grid>
+                        <StackPanel Grid.Column="1" Margin="14,2,0,0">
+                            <TextBlock x:Name="SyncTitle" Style="{StaticResource PageTitle}" FontSize="18" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="SyncBody" FontSize="12" LineHeight="18" Foreground="{StaticResource InkSoftBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Margin="0,16,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="10"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="10"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Style="{StaticResource SyncStat}">
+                            <StackPanel>
+                                <TextBlock Text="Waiting to send" Style="{StaticResource Sub}" FontSize="10"/>
+                                <TextBlock x:Name="SyncWaitingCount" FontSize="20" FontWeight="Bold" Foreground="{StaticResource InkBrush}"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Column="2" Style="{StaticResource SyncStat}">
+                            <StackPanel>
+                                <TextBlock Text="Not accepted" Style="{StaticResource Sub}" FontSize="10"/>
+                                <TextBlock x:Name="SyncRejectedCount" FontSize="20" FontWeight="Bold" Foreground="{StaticResource InkBrush}"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Column="4" Style="{StaticResource SyncStat}">
+                            <StackPanel>
+                                <TextBlock Text="Last sent" Style="{StaticResource Sub}" FontSize="10"/>
+                                <TextBlock x:Name="SyncLastSent" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" Margin="0,4,0,0"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <ScrollViewer MaxHeight="330" VerticalScrollBarVisibility="Auto" Margin="0,16,0,0">
+                        <StackPanel>
+                            <TextBlock x:Name="SyncRejectedTitle" Text="Not accepted by the server" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,0,0,8"/>
+                            <ItemsControl x:Name="SyncRejectedList" ItemTemplate="{StaticResource SyncRowTemplate}"/>
+                            <TextBlock x:Name="SyncWaitingTitle" Text="Waiting to send" Style="{StaticResource SectionTitle}" FontSize="13" Margin="0,6,0,8"/>
+                            <ItemsControl x:Name="SyncWaitingList" ItemTemplate="{StaticResource SyncRowTemplate}"/>
+                            <Border x:Name="SyncAllClear" Background="{StaticResource GreenSoftBrush}" CornerRadius="10" Padding="12,10">
+                                <TextBlock Text="Nothing is waiting. Every scan on this computer has reached the server." FontSize="12"
+                                           Foreground="{StaticResource GreenBrush}" FontWeight="Medium" TextWrapping="Wrap"/>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <Grid Margin="0,16,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="10"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button Style="{StaticResource SoftBtn}" Content="Close" Click="SyncClose_Click"/>
+                        <Button x:Name="SyncNowButton" Grid.Column="2" Style="{StaticResource PrimaryBtn}" Padding="0,12" Click="SyncNow_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE627;" Style="{StaticResource Icon}" FontSize="16" Foreground="White"/>
+                                <TextBlock x:Name="SyncNowText" Text="Send now" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                </StackPanel>
+            </Border>
         </Grid>
 
         <!-- ===== What happens at the reader ===== -->
@@ -110,13 +221,9 @@
             <Border x:Name="ScanCard" Style="{StaticResource PopupCard}" Visibility="Collapsed">
                 <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
                 <StackPanel>
-                    <Grid Width="130" Height="130" HorizontalAlignment="Center">
-                        <Ellipse x:Name="ScanPulse" Fill="{StaticResource BlueSoftBrush}" RenderTransformOrigin="0.5,0.5">
-                            <Ellipse.RenderTransform><ScaleTransform x:Name="ScanPulseScale"/></Ellipse.RenderTransform>
-                        </Ellipse>
-                        <Ellipse Width="84" Height="84" Fill="{StaticResource BlueBrush}"/>
-                        <TextBlock Text="&#xE90D;" Style="{StaticResource Icon}" FontSize="48" Foreground="White" HorizontalAlignment="Center"/>
-                    </Grid>
+                    <Border Width="164" Height="164" CornerRadius="82" Background="{StaticResource ScannerGradient}" BorderBrush="{StaticResource BlueFixedBrush}" BorderThickness="1" HorizontalAlignment="Center">
+                        <local:FingerprintScanner x:Name="ScanPrint" Margin="4"/>
+                    </Border>
                     <TextBlock x:Name="ScanTitle" Style="{StaticResource PageTitle}" FontSize="18" HorizontalAlignment="Center" Margin="0,14,0,0"/>
                     <TextBlock x:Name="ScanBody" FontSize="12" LineHeight="18" Foreground="{StaticResource InkSoftBrush}" TextAlignment="Center"
                                TextWrapping="Wrap" Margin="0,6,0,4"/>
@@ -187,7 +294,7 @@
                             <Image Source="/Assets/3D/door.png" Width="44" Height="44" RenderOptions.BitmapScalingMode="HighQuality"/>
                             <StackPanel Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center">
                                 <TextBlock Text="Temporary check-out" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
-                                <TextBlock Text="An emergency. Give a reason and when you'll be back. Not counted as late."
+                                <TextBlock Text="An emergency. Give a reason and type how many minutes you need. Not counted as late."
                                            Style="{StaticResource Sub}" TextWrapping="Wrap"/>
                             </StackPanel>
                             <TextBlock Grid.Column="2" Text="&#xE5CC;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource BlueBrush}"/>
@@ -243,8 +350,26 @@
                         </Grid>
                     </Border>
 
-                    <TextBlock Text="What time will you be back today?" Style="{StaticResource FieldLabel}" Margin="0,14,0,6"/>
-                    <ComboBox x:Name="ReturnTimeCombo" SelectionChanged="ReturnTimeCombo_SelectionChanged"/>
+                    <TextBlock Text="How many minutes do you need?" Style="{StaticResource FieldLabel}" Margin="0,14,0,6"/>
+                    <Border x:Name="MinutesShell" Style="{StaticResource InputShell}" Height="54" Padding="14,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="&#xE425;" Style="{StaticResource Icon}" FontSize="20" Foreground="{StaticResource BlueBrush}"/>
+                            <TextBox x:Name="MinutesBox" Grid.Column="1" Style="{StaticResource InputBox}" FontSize="20" FontWeight="SemiBold"
+                                     MaxLength="3" Margin="10,0,0,0" InputMethod.IsInputMethodEnabled="False"
+                                     PreviewTextInput="MinutesBox_PreviewTextInput" PreviewKeyDown="MinutesBox_PreviewKeyDown"
+                                     DataObject.Pasting="MinutesBox_Pasting" TextChanged="MinutesBox_TextChanged"/>
+                            <TextBlock x:Name="MinutesPlaceholder" Grid.Column="1" Text="Type the minutes, for example 45" Foreground="{StaticResource MutedBrush}"
+                                       FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                            <TextBlock Grid.Column="2" Text="minutes" FontSize="13" FontWeight="Medium" Foreground="{StaticResource InkSoftBrush}" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+                    <TextBlock x:Name="MinutesPreview" Style="{StaticResource Sub}" FontSize="12" Margin="2,7,0,0" TextWrapping="Wrap"
+                               Text="Numbers only. You will see when you are expected back."/>
 
                     <TextBlock x:Name="TemporaryError" Foreground="{StaticResource ErrorBrush}" FontSize="11" FontWeight="Medium"
                                TextWrapping="Wrap" Margin="0,10,0,0" Visibility="Collapsed"/>

@@ -24,7 +24,11 @@ public interface ITerminalAdapter
     /// <summary>A finger is on the glass but the image is too weak to read (once per touch).</summary>
     event Action? FingerPoorQuality;
 
+    /// <summary>Opens the reader. Safe to call again after a failure or after the reader was lost.</summary>
     Task ConnectAsync(CancellationToken cancellationToken);
+
+    /// <summary>True once the open reader has stopped answering for a while, as when its cable is pulled out.</summary>
+    bool IsDeviceLost { get; }
     Task<IReadOnlyList<TerminalEvent>> PollEventsAsync(CancellationToken cancellationToken);
     Task<bool> EnrollAsync(string terminalUserId, CancellationToken cancellationToken);
     Task RemoveEnrollmentAsync(string terminalUserId);

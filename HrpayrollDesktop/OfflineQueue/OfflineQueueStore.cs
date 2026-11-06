@@ -14,7 +14,7 @@ public class OfflineQueueStore
     public OfflineQueueStore(ILogger<OfflineQueueStore> logger)
     {
         _logger = logger;
-        var dbPath = Path.Combine(AppContext.BaseDirectory, "offline-queue.db");
+        var dbPath = HrpayrollDesktop.Config.AppPaths.Data("offline-queue.db");
         _connectionString = $"Data Source={dbPath}";
     }
 
@@ -103,9 +103,39 @@ public class OfflineQueueStore
         command.ExecuteNonQuery();
     }
 
-    /// <summary>Events that are due now, oldest first. Rejected events and events still backing off are skipped,
-    /// so one bad event can never block the ones behind it.</summary>
+    /// <summary>
+    /// Events that are due now, oldest first. Rejected events and events still backing off are skipped, so one bad
+    /// event never blocks other people's. But a person's later scans wait while an earlier scan of theirs is backing
+    /// off: a check-out sent before its check-in would be refused for good ("no open clock-in").
+    /// </summary>
     public List<QueuedEvent> GetPending(int maxBatchSize = 20)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, EventId, TerminalUserId, Timestamp, VerifyMethod, EventType, Attempts, LastError, CreatedAt, ExpectedBackUtc, Reason
+            FROM queued_events q
+            WHERE q.Status = 'PENDING'
+              AND (q.NextAttemptAt IS NULL OR q.NextAttemptAt <= $now)
+              AND NOT EXISTS (
+                  SELECT 1 FROM queued_events earlier
+                  WHERE earlier.Status = 'PENDING'
+                    AND earlier.TerminalUserId = q.TerminalUserId
+                    AND (earlier.CreatedAt < q.CreatedAt OR (earlier.CreatedAt = q.CreatedAt AND earlier.Id < q.Id))
+                    AND earlier.NextAttemptAt > $now)
+            ORDER BY q.CreatedAt ASC, q.Id ASC
+            LIMIT $maxBatchSize;
+            """;
+        command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
+        command.Parameters.AddWithValue("$maxBatchSize", maxBatchSize);
+
+        return ReadEvents(command);
+    }
+
+    /// <summary>Every scan still on its way to the server, oldest first, including those backing off.</summary>
+    public List<QueuedEvent> GetAllPending(int maxCount = 200)
     {
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
@@ -115,12 +145,10 @@ public class OfflineQueueStore
             SELECT Id, EventId, TerminalUserId, Timestamp, VerifyMethod, EventType, Attempts, LastError, CreatedAt, ExpectedBackUtc, Reason
             FROM queued_events
             WHERE Status = 'PENDING'
-              AND (NextAttemptAt IS NULL OR NextAttemptAt <= $now)
             ORDER BY CreatedAt ASC, Id ASC
-            LIMIT $maxBatchSize;
+            LIMIT $max;
             """;
-        command.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
-        command.Parameters.AddWithValue("$maxBatchSize", maxBatchSize);
+        command.Parameters.AddWithValue("$max", maxCount);
 
         return ReadEvents(command);
     }

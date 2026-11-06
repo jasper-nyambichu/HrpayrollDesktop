@@ -94,6 +94,59 @@ public class BackendApiClient
         return LoginResult.Ok(envelope.Data);
     }
 
+    // ----- Forgotten password: the same three steps as the web sign-in pages -----
+
+    /// <summary>
+    /// Asks for a 6-digit code to be emailed to the account's address. The server answers the same way for any
+    /// username or email, so success only means the request arrived. Null on success, otherwise what to show.
+    /// </summary>
+    public async Task<string?> RequestPasswordResetCodeAsync(string identifier, CancellationToken cancellationToken)
+    {
+        var (_, error) = await PostAnonymousAsync<JsonElement>("/auth/forgot-password", new { identifier }, cancellationToken);
+        return error;
+    }
+
+    /// <summary>Checks the emailed code. Returns the short-lived token that allows setting a new password.</summary>
+    public async Task<(string? ResetToken, string? Error)> VerifyPasswordResetCodeAsync(string identifier, string code, CancellationToken cancellationToken)
+    {
+        var (data, error) = await PostAnonymousAsync<ResetTokenData>("/auth/verify-reset-code", new { identifier, code }, cancellationToken);
+        if (error is null && string.IsNullOrEmpty(data?.ResetToken))
+            return (null, "The server didn't confirm the code. Please try again.");
+        return (data?.ResetToken, error);
+    }
+
+    /// <summary>Sets the new password. Null on success, otherwise what to show.</summary>
+    public async Task<string?> ResetPasswordAsync(string resetToken, string newPassword, CancellationToken cancellationToken)
+    {
+        var (_, error) = await PostAnonymousAsync<JsonElement>("/auth/reset-password", new { resetToken, newPassword }, cancellationToken);
+        return error;
+    }
+
+    private sealed record ResetTokenData(string ResetToken);
+
+    private async Task<(T? Data, string? Error)> PostAnonymousAsync<T>(string path, object body, CancellationToken cancellationToken)
+    {
+        var response = await _httpClient.PostAsJsonAsync(path, body, WebJson, cancellationToken);
+        var text = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            // Never the body: it can hold the code.
+            _logger.LogWarning("{Path} failed: {StatusCode}", path, response.StatusCode);
+            var (fromBackend, message) = ReadBackendError(text);
+            if ((int)response.StatusCode == 404 && !fromBackend)
+                return (default, "The server doesn't offer password resets yet. Ask your administrator to update it.");
+            if ((int)response.StatusCode == 429)
+                return (default, "Too many tries. Wait a few minutes, then try again.");
+            return (default, fromBackend && (int)response.StatusCode < 500
+                ? message
+                : "The server isn't available right now. Please try again shortly.");
+        }
+
+        var envelope = JsonSerializer.Deserialize<ApiResponse<T>>(text, WebJson);
+        return (envelope is null ? default : envelope.Data, null);
+    }
+
     /// <summary>Everyone at the branch. Null when it can't be loaded, so that is never mistaken for an empty branch.</summary>
     public async Task<List<EmployeeSummary>?> GetEmployeesByBranchAsync(long branchId, string staffAccessToken, CancellationToken cancellationToken)
     {
@@ -183,6 +236,37 @@ public class BackendApiClient
         return envelope?.Data;
     }
 
+    /// <summary>
+    /// Branch Manager only: checks the ticked employees in now, at the server's time, for when the reader fails.
+    /// Returns one result per employee, or the server's refusal as Error.
+    /// </summary>
+    public async Task<(List<ManualCheckInResult>? Results, string? Error)> ManualCheckInAsync(
+        IReadOnlyCollection<long> employeeIds, string staffAccessToken, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/attendance/manual-check-in");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", staffAccessToken);
+        request.Content = JsonContent.Create(new ManualCheckInBody(employeeIds), mediaType: null, options: WebJson);
+
+        var response = await _httpClient.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("Manual check-in failed: {StatusCode} {Body}", (int)response.StatusCode, body);
+            var (fromBackend, message) = ReadBackendError(body);
+            return (null, (int)response.StatusCode switch
+            {
+                403 => "Only a Branch Manager can check employees in by hand.",
+                404 when !fromBackend => "The server doesn't offer manual check-in yet. Ask your administrator to update it.",
+                _ when fromBackend => FriendlyMessages.Translate(message),
+                _ => "The server isn't available right now. Nobody was checked in. Please try again shortly.",
+            });
+        }
+
+        var envelope = JsonSerializer.Deserialize<ApiResponse<List<ManualCheckInResult>>>(body, WebJson);
+        return envelope?.Data is { } results ? (results, null) : (null, envelope?.Message ?? "Manual check-in failed.");
+    }
+
     // ------------------------------------------------------------------ device-token calls
 
     public async Task<SyncResult> SyncEventAsync(string eventId, string terminalUserId, DateTime timestamp, string verifyMethod, string eventType,
@@ -222,6 +306,31 @@ public class BackendApiClient
         }
 
         return SyncResult.Ok();
+    }
+
+    /// <summary>
+    /// Whether the server still accepts this PC's reader key: false when it refuses it (the reader was set up on
+    /// another PC since, which issues a new key), null when that can't be told (offline, server fault).
+    /// </summary>
+    public async Task<bool?> CheckDeviceCredentialsAsync(CancellationToken cancellationToken)
+    {
+        if (_deviceIdentity is null) return false;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/attendance/biometric/mappings");
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            if (response.IsSuccessStatusCode) return true;
+            if ((int)response.StatusCode is 401 or 403)
+            {
+                var (fromBackend, _) = ReadBackendError(await response.Content.ReadAsStringAsync(cancellationToken));
+                return fromBackend ? false : null;
+            }
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

@@ -6,7 +6,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
 namespace HrpayrollDesktop;
@@ -20,15 +19,27 @@ public sealed record RecentScan(string Name, string Line, Brush AvatarBg, Brush 
 /// <summary>The figures on the home screen.</summary>
 public sealed record KioskToday(int AtWork, int OnBreak, int Left, IReadOnlyList<RecentScan> AtWorkPeople);
 
+/// <summary>How the home screen's sync pill looks.</summary>
+public enum SyncTone { Good, Busy, Warning, Problem }
+
 /// <summary>The home screen nobody signs in to. The reader listens the whole time; pop-ups show what each scan did.</summary>
 public partial class KioskView : UserControl
 {
+    private const string IdleTitle = "Place your finger on the reader";
+    private const string IdleSub = "One scan checks you in, starts a break, brings you back, or checks you out.";
+    private const int PromptSeconds = 20;
+
     private readonly DispatcherTimer _clockTimer;
+    private readonly DispatcherTimer _promptTimer = new() { Interval = TimeSpan.FromSeconds(PromptSeconds) };
+    private readonly DispatcherTimer _outcomeTimer = new() { Interval = TimeSpan.FromSeconds(2.6) };
+    private bool _readerConnected = true;
 
     public event Action? ManagerLoginRequested;
+    public event Action? ManualCheckInRequested;
     public event Action? ScanRequested;
     public event Action? SeeAllRequested;
     public event Action? HelpRequested;
+    public event Action? SyncStatusRequested;
 
     public KioskView()
     {
@@ -39,19 +50,102 @@ public partial class KioskView : UserControl
         _clockTimer.Start();
         UpdateClock();
 
-        Loaded += (_, _) => StartFloating();
-        SizeChanged += (_, _) =>
+        _promptTimer.Tick += (_, _) => ShowIdle();
+        _outcomeTimer.Tick += (_, _) => ShowIdle();
+
+        SizeChanged += (_, _) => ArrangeForSize();
+    }
+
+    // Small windows drop the guide cards first (the same text is under "How it works"), then the right column,
+    // so the scanner and its button always fit.
+    private void ArrangeForSize()
+    {
+        var side = ActualWidth >= 1200 ? 280 : ActualWidth >= 900 ? 250 : 0;
+        SidePanel.Visibility = side > 0 ? Visibility.Visible : Visibility.Collapsed;
+        SideColumn.Width = new GridLength(side);
+
+        var mainWidth = ActualWidth - 190 - 24 - side - (side > 0 ? 18 : 0) - 32;
+        StepsRow.Visibility = mainWidth >= 640 && ActualHeight >= 600 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // ----- The scanner -----
+
+    /// <summary>Someone pressed "Scan fingerprint": invite a finger for a while. The reader listens either way.</summary>
+    public void PromptForFinger()
+    {
+        StopTimers();
+        Scanner.SetState(ScannerState.Ready);
+        SetScannerText("Place your finger on the reader now", "Hold still until you see your name, then lift.", "Waiting for a finger", "#0891B2");
+        _promptTimer.Start();
+    }
+
+    /// <summary>A finger is on the reader and is being matched.</summary>
+    public void ShowScanning()
+    {
+        StopTimers();
+        Scanner.SetState(ScannerState.Scanning);
+        SetScannerText("Scanning…", "Keep your finger still.", "Reading", "#0891B2");
+    }
+
+    /// <summary>What the scan did, for a moment, before the scanner goes back to waiting.</summary>
+    public void ShowScanOutcome(bool recognised, string title, string? sub = null)
+    {
+        StopTimers();
+        Scanner.SetState(recognised ? ScannerState.Success : ScannerState.Failure);
+        SetScannerText(title, sub ?? string.Empty, recognised ? "Recognised" : "Not recognised", recognised ? "#10B981" : "#EF4444");
+        _outcomeTimer.Start();
+    }
+
+    private void ShowIdle()
+    {
+        StopTimers();
+        Scanner.SetState(ScannerState.Idle);
+        if (_readerConnected) SetScannerText(IdleTitle, IdleSub, "Ready", "#0891B2");
+        else SetScannerText("The fingerprint reader is not connected", "Check the reader's USB cable. Meanwhile your Branch Manager can check you in under \"Manual check-in\".", "No reader", "#D18F00");
+    }
+
+    private void StopTimers()
+    {
+        _promptTimer.Stop();
+        _outcomeTimer.Stop();
+    }
+
+    private void SetScannerText(string title, string sub, string chip, string colour)
+    {
+        ScanStatusTitle.Text = title;
+        ScanStatusSub.Text = sub;
+        ScanStatusSub.Visibility = string.IsNullOrEmpty(sub) ? Visibility.Collapsed : Visibility.Visible;
+        ScannerChipText.Text = chip;
+
+        var c = (Color)ColorConverter.ConvertFromString(colour);
+        ScannerChipDot.Fill = new SolidColorBrush(c);
+        ScannerChip.Background = new SolidColorBrush(Color.FromArgb(0x1A, c.R, c.G, c.B));
+        ScannerChip.BorderBrush = new SolidColorBrush(Color.FromArgb(0x40, c.R, c.G, c.B));
+    }
+
+    // ----- Sync -----
+
+    /// <summary>The pill in the top bar: whether scans are reaching the server, and how many are waiting.</summary>
+    public void SetSyncStatus(SyncTone tone, string text)
+    {
+        var (bg, fg, icon) = tone switch
         {
-            var wide = ActualWidth >= 1000;
-            SidePanel.Visibility = wide ? Visibility.Visible : Visibility.Collapsed;
-            SideColumn.Width = wide ? new GridLength(270) : new GridLength(0);
+            SyncTone.Good => ("GreenSoftBrush", "GreenBrush", ""),       // cloud_done
+            SyncTone.Busy => ("BlueSoftBrush", "BlueBrush", ""),         // sync
+            SyncTone.Warning => ("AmberSoftBrush", "AmberInkBrush", ""), // cloud_off
+            _ => ("ErrorSoftBrush", "ErrorBrush", ""),                  // sync_problem
         };
+
+        SyncPill.Background = (Brush)FindResource(bg);
+        SyncIcon.Foreground = SyncText.Foreground = (Brush)FindResource(fg);
+        SyncIcon.Text = icon;
+        SyncText.Text = text;
     }
 
     private void UpdateClock()
     {
         var now = DateTime.Now;
-        LiveClockText.Text = now.ToString("h:mm:ss tt", CultureInfo.InvariantCulture);
+        LiveClockText.Text = now.ToString("h:mm tt", CultureInfo.InvariantCulture);
         LiveDateText.Text = now.ToString("MMMM d, yyyy  •  dddd", CultureInfo.InvariantCulture);
         GreetingText.Text = now.Hour < 12 ? "Good morning!" : now.Hour < 17 ? "Good afternoon!" : "Good evening!";
     }
@@ -67,6 +161,9 @@ public partial class KioskView : UserControl
         FooterStatusDot.Fill = (Brush)FindResource(connected ? "GreenBrush" : "ErrorBrush");
         FooterStatusText.Foreground = (Brush)FindResource(connected ? "GreenBrush" : "ErrorBrush");
         FooterStatusText.Text = connected ? "Reader connected" : "Reader not detected";
+
+        _readerConnected = connected;
+        if (Scanner.State is ScannerState.Idle) ShowIdle();
     }
 
     public void SetToday(IReadOnlyList<RecentScan> recent, KioskToday today)
@@ -107,26 +204,19 @@ public partial class KioskView : UserControl
         },
     };
 
-    private void StartFloating()
-    {
-        DoubleAnimation Float(double by, double seconds) => new(0, by, TimeSpan.FromSeconds(seconds))
-        {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
-        };
-
-        FloatA.BeginAnimation(TranslateTransform.YProperty, Float(-7, 2.6));
-        FloatB.BeginAnimation(TranslateTransform.YProperty, Float(6, 3.1));
-    }
-
     private void ManagerLoginButton_Click(object sender, RoutedEventArgs e) => ManagerLoginRequested?.Invoke();
+
+    private void ManualCheckInButton_Click(object sender, RoutedEventArgs e) => ManualCheckInRequested?.Invoke();
 
     private void Scan_Click(object sender, RoutedEventArgs e) => ScanRequested?.Invoke();
 
     private void SeeAll_Click(object sender, RoutedEventArgs e) => SeeAllRequested?.Invoke();
 
     private void Help_Click(object sender, RoutedEventArgs e) => HelpRequested?.Invoke();
+
+    private void SyncStatus_Click(object sender, RoutedEventArgs e) => SyncStatusRequested?.Invoke();
+
+    private void Scanner_MouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e) => ScanRequested?.Invoke();
 
     // There is only one page here, so the item simply stays selected.
     private void NavHome_Click(object sender, RoutedEventArgs e)

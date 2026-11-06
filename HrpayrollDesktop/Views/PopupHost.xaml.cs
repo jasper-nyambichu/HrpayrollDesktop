@@ -18,8 +18,25 @@ public enum PopupKind { Success, Info, Warning, Error }
 /// <summary>One line in a "See all" list.</summary>
 public sealed record PopupListRow(string Name, string Initials, string Detail, string Time, Brush AvatarBg, Brush AvatarFg);
 
-/// <summary>What the person at the reader chose. Reason and ReturnAtLocal are only set for a temporary check-out.</summary>
+/// <summary>What the person at the reader chose. Reason and Minutes are only set for a temporary check-out.</summary>
 public enum ScanChoice { Lunch, Temporary, ClockOut, Cancelled }
+
+/// <summary>One scan in the sync card.</summary>
+public sealed record SyncScanRow(string Name, string What, string When, string Note, Brush NoteFg, Brush RowBg, Brush AvatarBg, Brush AvatarFg)
+{
+    public string Initials => PopupHost.Initials(Name);
+}
+
+/// <summary>Everything the sync card shows.</summary>
+public sealed record SyncOverview(
+    SyncTone Tone,
+    string Title,
+    string Body,
+    int Waiting,
+    int Rejected,
+    string LastSent,
+    IReadOnlyList<SyncScanRow> RejectedRows,
+    IReadOnlyList<SyncScanRow> WaitingRows);
 
 /// <summary>
 /// Every pop-up in the application. Reader pop-ups sit on their own layer above Back Office dialogs, so someone
@@ -27,7 +44,7 @@ public enum ScanChoice { Lunch, Temporary, ClockOut, Cancelled }
 /// </summary>
 public partial class PopupHost : UserControl
 {
-    private const int MinScanMs = 700;      // keep "Scanning" visible at least this long, so it doesn't flicker
+    private const int MinScanMs = 900;      // keep "Scanning" visible at least this long, so it doesn't flicker
     private const int ChoiceSeconds = 30;   // someone who walks away from the choice records nothing
     private const int TemporaryIdleSeconds = 120;
     private const int ScanPromptSeconds = 20;
@@ -43,8 +60,10 @@ public partial class PopupHost : UserControl
     private Action? _onCountdownTick;
     private Action? _onCountdownDone;
 
-    private Action<ScanChoice, string?, DateTime?>? _choiceHandler;
+    private Action<ScanChoice, string?, int?>? _choiceHandler;
+    private DateTime _choiceScannedAtUtc;
     private TaskCompletionSource<bool>? _confirm;
+    private Action? _syncNow;
 
     public PopupHost()
     {
@@ -110,13 +129,16 @@ public partial class PopupHost : UserControl
         ScanBody.Text = "Hold still until you see your name, then lift.";
         ScanCancelButton.Visibility = Visibility.Visible;
         ShowScanCard(ScanCard);
-        StartPulse();
+        ScanPrint.SetState(ScannerState.Ready);
 
         StartCountdown(ScanPromptSeconds, null, CloseScanLayer);
     }
 
-    /// <summary>A usable fingerprint was captured and matching has started.</summary>
-    public void BeginScan()
+    /// <summary>
+    /// A usable fingerprint was captured and matching has started. With <paramref name="showCard"/> false the
+    /// home screen's own scanner shows the scanning, and this only times the result so it doesn't flash past.
+    /// </summary>
+    public void BeginScan(bool showCard = true)
     {
         if (IsChoosing) return;
 
@@ -125,14 +147,21 @@ public partial class PopupHost : UserControl
         _countdown.Stop();
         _scanStartedUtc = DateTime.UtcNow;
 
+        if (!showCard)
+        {
+            if (ScanCard.Visibility == Visibility.Visible) CloseScanLayer();
+            _scanStartedUtc = DateTime.UtcNow;
+            return;
+        }
+
+        _scanWatchdog.Stop();
+        _scanWatchdog.Start();
+
         ScanTitle.Text = "Scanning…";
         ScanBody.Text = "Matching your fingerprint. Keep your finger still.";
         ScanCancelButton.Visibility = Visibility.Collapsed;
         ShowScanCard(ScanCard);
-        StartPulse();
-
-        _scanWatchdog.Stop();
-        _scanWatchdog.Start();
+        ScanPrint.SetState(ScannerState.Scanning);
     }
 
     public void ShowMessage(PopupKind kind, string title, string body, string? note = null, int autoCloseSeconds = 5, string closeText = "Close")
@@ -164,7 +193,6 @@ public partial class PopupHost : UserControl
             MessageNoteText.Text = note ?? string.Empty;
 
             ShowScanCard(MessageCard);
-            StopPulse();
 
             void Label() => MessageCloseButton.Content = autoCloseSeconds > 0 ? $"{closeText} ({_remaining}s)" : closeText;
             if (autoCloseSeconds > 0)
@@ -205,11 +233,12 @@ public partial class PopupHost : UserControl
     // ----- The choice after someone at work scans -----
 
     /// <summary>Asks where someone at work is going. The scan records nothing until they answer.</summary>
-    public void ShowChoice(string name, string? detail, DateTime? clockedInAtUtc, DateTime lunchBackAtUtc,
-        Action<ScanChoice, string?, DateTime?> handler)
+    public void ShowChoice(string name, string? detail, DateTime scannedAtUtc, DateTime? clockedInAtUtc, DateTime lunchBackAtUtc,
+        Action<ScanChoice, string?, int?> handler)
     {
         // Set straight away: another finger arriving now must not cancel this person's turn.
         _choiceHandler = handler;
+        _choiceScannedAtUtc = scannedAtUtc;
         _scanWatchdog.Stop();
 
         AfterMinScan(() =>
@@ -231,7 +260,6 @@ public partial class PopupHost : UserControl
     private void OpenChoice()
     {
         ShowScanCard(ChoiceCard);
-        StopPulse();
 
         void Label() => ChoiceCancelText.Text = $"Cancel ({_remaining}s)";
         StartCountdown(ChoiceSeconds, Label, () => FinishChoice(ScanChoice.Cancelled, null, null));
@@ -239,13 +267,13 @@ public partial class PopupHost : UserControl
         ChoiceCard.Focus();
     }
 
-    private void FinishChoice(ScanChoice choice, string? reason, DateTime? returnAtLocal)
+    private void FinishChoice(ScanChoice choice, string? reason, int? minutes)
     {
         _countdown.Stop();
         var handler = _choiceHandler;
         _choiceHandler = null;
         CloseScanLayer();
-        handler?.Invoke(choice, reason, returnAtLocal);
+        handler?.Invoke(choice, reason, minutes);
     }
 
     private void ChooseLunch_Click(object sender, RoutedEventArgs e) => FinishChoice(ScanChoice.Lunch, null, null);
@@ -258,36 +286,70 @@ public partial class PopupHost : UserControl
     {
         foreach (var chip in ReasonChips.Children.OfType<RadioButton>()) chip.IsChecked = false;
         ReasonBox.Text = string.Empty;
+        MinutesBox.Text = string.Empty;
         TemporaryError.Visibility = Visibility.Collapsed;
-        FillReturnTimes();
+        UpdateMinutesPreview();
 
         ShowScanCard(TemporaryCard);
         StartCountdown(TemporaryIdleSeconds, null, () => FinishChoice(ScanChoice.Cancelled, null, null));
     }
 
-    // Quarter-hours from now until the end of today: anything earlier or on another day can't be picked.
-    private void FillReturnTimes()
+    // The temporary check-out must end the same day it started (the server refuses anything later).
+    private int MaxMinutesToday()
     {
-        var now = DateTime.Now;
-        var next = now.Date.AddHours(now.Hour).AddMinutes((now.Minute / 15 + 1) * 15);
-        if (next - now < TimeSpan.FromMinutes(5)) next = next.AddMinutes(15);
-
-        var times = new List<ReturnTime>();
-        for (var t = next; t.Date == now.Date; t = t.AddMinutes(15))
-            times.Add(new ReturnTime(t));
-
-        ReturnTimeCombo.ItemsSource = times;
-        ReturnTimeCombo.SelectedIndex = -1;
+        var scanned = _choiceScannedAtUtc.ToLocalTime();
+        return Math.Max(0, (int)Math.Floor((scanned.Date.AddDays(1) - scanned).TotalMinutes) - 1);
     }
 
-    private sealed record ReturnTime(DateTime At)
+    private DateTime BackAtLocal(int minutes) => _choiceScannedAtUtc.ToLocalTime().AddMinutes(minutes);
+
+    private static string Length(int minutes) =>
+        minutes >= 60 ? $"{minutes / 60}h {minutes % 60:00}m" : $"{minutes} minute{(minutes == 1 ? "" : "s")}";
+
+    private void UpdateMinutesPreview()
     {
-        public override string ToString()
+        MinutesPlaceholder.Visibility = MinutesBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        if (!int.TryParse(MinutesBox.Text, NumberStyles.None, CultureInfo.InvariantCulture, out var minutes) || minutes == 0)
         {
-            var away = At - DateTime.Now;
-            var length = away.TotalHours >= 1 ? $"{(int)away.TotalHours}h {away.Minutes:00}m" : $"{Math.Max(1, (int)Math.Round(away.TotalMinutes))}m";
-            return $"{At.ToString("h:mm tt", CultureInfo.InvariantCulture)}   (in {length})";
+            MinutesPreview.Text = "Numbers only. You will see when you are expected back.";
+            MinutesPreview.Foreground = Res("MutedBrush");
+            return;
         }
+
+        if (minutes > MaxMinutesToday())
+        {
+            MinutesPreview.Text = $"That goes past midnight. Today you can be away for at most {MaxMinutesToday()} minutes.";
+            MinutesPreview.Foreground = Res("ErrorBrush");
+            return;
+        }
+
+        MinutesPreview.Text = $"{Length(minutes)} away. Expected back at {BackAtLocal(minutes).ToString("h:mm tt", CultureInfo.InvariantCulture)}.";
+        MinutesPreview.Foreground = Res("PrimaryBrush");
+    }
+
+    // Only digits can go in, whether typed, pasted or dropped.
+    private void MinutesBox_PreviewTextInput(object sender, TextCompositionEventArgs e) =>
+        e.Handled = e.Text.Length == 0 || !e.Text.All(char.IsAsciiDigit);
+
+    private void MinutesBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Space) e.Handled = true;   // a space never goes through PreviewTextInput
+    }
+
+    private void MinutesBox_Pasting(object sender, DataObjectPastingEventArgs e)
+    {
+        var text = e.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true)
+            ? e.SourceDataObject.GetData(DataFormats.UnicodeText) as string
+            : null;
+        if (string.IsNullOrEmpty(text) || !text.All(char.IsAsciiDigit)) e.CancelCommand();
+    }
+
+    private void MinutesBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        KeepAlive();
+        TemporaryError.Visibility = Visibility.Collapsed;
+        UpdateMinutesPreview();
     }
 
     private void ReasonChip_Checked(object sender, RoutedEventArgs e)
@@ -297,18 +359,13 @@ public partial class PopupHost : UserControl
 
         ReasonBox.Text = reason;
         if (reason.Length == 0) ReasonBox.Focus();
+        else MinutesBox.Focus();
     }
 
     private void ReasonBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         KeepAlive();
         ReasonPlaceholder.Visibility = ReasonBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        TemporaryError.Visibility = Visibility.Collapsed;
-    }
-
-    private void ReturnTimeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        KeepAlive();
         TemporaryError.Visibility = Visibility.Collapsed;
     }
 
@@ -328,20 +385,36 @@ public partial class PopupHost : UserControl
             return;
         }
 
-        if (ReturnTimeCombo.SelectedItem is not ReturnTime back)
+        var typed = MinutesBox.Text.Trim();
+        if (typed.Length == 0)
         {
-            ShowTemporaryError("Please choose what time you will be back.");
+            MinutesBox.Focus();
+            ShowTemporaryError("Please type how many minutes you need, in numbers.");
             return;
         }
 
-        if (back.At <= DateTime.Now)
+        if (!typed.All(char.IsAsciiDigit) || !int.TryParse(typed, NumberStyles.None, CultureInfo.InvariantCulture, out var minutes))
         {
-            FillReturnTimes();
-            ShowTemporaryError("That time has passed. Please choose a later one.");
+            MinutesBox.Focus();
+            ShowTemporaryError("Use numbers only for the minutes, for example 45.");
             return;
         }
 
-        FinishChoice(ScanChoice.Temporary, reason, back.At);
+        if (minutes < 1)
+        {
+            MinutesBox.Focus();
+            ShowTemporaryError("The minutes must be at least 1.");
+            return;
+        }
+
+        if (minutes > MaxMinutesToday())
+        {
+            MinutesBox.Focus();
+            ShowTemporaryError($"You must be back today. The most you can enter now is {MaxMinutesToday()} minutes.");
+            return;
+        }
+
+        FinishChoice(ScanChoice.Temporary, reason, minutes);
     }
 
     private void ShowTemporaryError(string text)
@@ -370,7 +443,7 @@ public partial class PopupHost : UserControl
         _deliverAction = null;
         _scanWatchdog.Stop();
         _scanStartedUtc = DateTime.MinValue;
-        StopPulse();
+        ScanPrint.SetState(ScannerState.Idle);
 
         foreach (var c in new FrameworkElement[] { ScanCard, MessageCard, ChoiceCard, TemporaryCard })
             c.Visibility = Visibility.Collapsed;
@@ -405,24 +478,6 @@ public partial class PopupHost : UserControl
 
     private void MessageClose_Click(object sender, RoutedEventArgs e) => CloseScanLayer();
 
-    private void StartPulse()
-    {
-        var pulse = new DoubleAnimation(0.82, 1, TimeSpan.FromSeconds(0.9))
-        {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
-        };
-        ScanPulseScale.BeginAnimation(ScaleTransform.ScaleXProperty, pulse);
-        ScanPulseScale.BeginAnimation(ScaleTransform.ScaleYProperty, pulse);
-    }
-
-    private void StopPulse()
-    {
-        ScanPulseScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-        ScanPulseScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-    }
-
     // ===================================================================
     //  Back Office dialogs
     // ===================================================================
@@ -455,10 +510,70 @@ public partial class PopupHost : UserControl
         ShowDialogCard(ListCard);
     }
 
+    // ----- Sync status -----
+
+    /// <summary>True while the sync card is open, so the caller knows to keep it up to date.</summary>
+    public bool IsSyncOpen => DialogLayer.Visibility == Visibility.Visible && SyncCard.Visibility == Visibility.Visible;
+
+    /// <summary>Shows what has reached the server, what is waiting, and what the server refused and why.</summary>
+    public void ShowSync(SyncOverview overview, Action syncNow)
+    {
+        _syncNow = syncNow;
+        FillSync(overview);
+        SyncNowButton.IsEnabled = true;
+        SyncNowText.Text = "Send now";
+        ShowDialogCard(SyncCard);
+    }
+
+    /// <summary>Refreshes the open sync card in place.</summary>
+    public void UpdateSync(SyncOverview overview)
+    {
+        if (!IsSyncOpen) return;
+        FillSync(overview);
+        SyncNowButton.IsEnabled = true;
+        SyncNowText.Text = "Send now";
+    }
+
+    private void FillSync(SyncOverview o)
+    {
+        var (halo, dot, icon) = o.Tone switch
+        {
+            SyncTone.Good => ("GreenSoftBrush", "GreenBrush", "\uE2BF"),
+            SyncTone.Busy => ("BlueSoftBrush", "BlueBrush", "\uE627"),
+            SyncTone.Warning => ("AmberSoftBrush", "AmberBrush", "\uE2C1"),
+            _ => ("ErrorSoftBrush", "ErrorBrush", "\uE629"),
+        };
+        SyncHalo.Fill = Res(halo);
+        SyncDot.Fill = Res(dot);
+        SyncIcon.Text = icon;
+        SyncTitle.Text = o.Title;
+        SyncBody.Text = o.Body;
+
+        SyncWaitingCount.Text = o.Waiting.ToString(CultureInfo.InvariantCulture);
+        SyncRejectedCount.Text = o.Rejected.ToString(CultureInfo.InvariantCulture);
+        SyncRejectedCount.Foreground = Res(o.Rejected > 0 ? "ErrorBrush" : "InkBrush");
+        SyncLastSent.Text = o.LastSent;
+
+        SyncRejectedList.ItemsSource = o.RejectedRows;
+        SyncWaitingList.ItemsSource = o.WaitingRows;
+        SyncRejectedTitle.Visibility = SyncRejectedList.Visibility = o.RejectedRows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        SyncWaitingTitle.Visibility = SyncWaitingList.Visibility = o.WaitingRows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        SyncAllClear.Visibility = o.RejectedRows.Count == 0 && o.WaitingRows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void SyncNow_Click(object sender, RoutedEventArgs e)
+    {
+        SyncNowButton.IsEnabled = false;
+        SyncNowText.Text = "Sending…";
+        _syncNow?.Invoke();
+    }
+
+    private void SyncClose_Click(object sender, RoutedEventArgs e) => CloseDialogLayer();
+
     private void ShowDialogCard(FrameworkElement card)
     {
-        ConfirmCard.Visibility = ReferenceEquals(ConfirmCard, card) ? Visibility.Visible : Visibility.Collapsed;
-        ListCard.Visibility = ReferenceEquals(ListCard, card) ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var c in new FrameworkElement[] { ConfirmCard, ListCard, SyncCard })
+            c.Visibility = ReferenceEquals(c, card) ? Visibility.Visible : Visibility.Collapsed;
         DialogLayer.Visibility = Visibility.Visible;
         Appear(card);
     }
@@ -467,7 +582,9 @@ public partial class PopupHost : UserControl
     {
         ConfirmCard.Visibility = Visibility.Collapsed;
         ListCard.Visibility = Visibility.Collapsed;
+        SyncCard.Visibility = Visibility.Collapsed;
         DialogLayer.Visibility = Visibility.Collapsed;
+        _syncNow = null;
     }
 
     private void AnswerConfirm(bool answer)

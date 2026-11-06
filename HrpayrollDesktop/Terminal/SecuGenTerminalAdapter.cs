@@ -26,6 +26,9 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
     private const int TemplateSize = 400;
     private const int EnrollTimeoutMs = 5000;
 
+    // About 5 seconds of frames the reader refuses to give means it has been unplugged.
+    private const int LostAfterFailedFrames = 25;
+
     // SecuGen security levels: 3 = LOW, 4 = BELOW_NORMAL, 5 = NORMAL ... 9 = HIGHEST.
     private const int IdentifyLevel = 4;
     private static readonly int[] NarrowingLevels = { 6, 8 };   // used only if several employees match
@@ -35,11 +38,11 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
     private const bool TraceFrames = false;
 
     private static readonly string TemplateStorePath =
-        Path.Combine(AppContext.BaseDirectory, "enrolled-templates.json");
+        HrpayrollDesktop.Config.AppPaths.Data("enrolled-templates.json");
 
     // Which of those templates the company database is known to hold.
     private static readonly string BackedUpStorePath =
-        Path.Combine(AppContext.BaseDirectory, "backed-up-templates.json");
+        HrpayrollDesktop.Config.AppPaths.Data("backed-up-templates.json");
 
     private const string TerminalIdPrefix = "emp-";
 
@@ -88,21 +91,35 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
         lock (_templateSync) return _templates.ContainsKey(terminalUserId);
     }
 
+    private int _failedFrames;
+
+    public bool IsDeviceLost => _fpm is not null && _failedFrames >= LostAfterFailedFrames;
+
     public async Task ConnectAsync(CancellationToken cancellationToken)
     {
         await _deviceLock.WaitAsync(cancellationToken);
         try
         {
-            _fpm = new SGFingerPrintManager();
+            // A reader that was lost is closed first, so it can be opened again once it is plugged back in.
+            if (_fpm is not null)
+            {
+                try { _fpm.CloseDevice(); } catch (Exception ex) { _logger.LogDebug("Closing the old reader handle failed: {Reason}", ex.Message); }
+                _fpm = null;
+            }
 
-            var initError = _fpm.Init(SGFPMDeviceName.DEV_AUTO);
-            var openError = _fpm.OpenDevice((int)SGFPMPortAddr.USB_AUTO_DETECT);
+            var fpm = new SGFingerPrintManager();
+            var initError = fpm.Init(SGFPMDeviceName.DEV_AUTO);
+            var openError = fpm.OpenDevice((int)SGFPMPortAddr.USB_AUTO_DETECT);
 
             if (openError != (int)SGFPMError.ERROR_NONE)
             {
-                _logger.LogError("SecuGen device failed to open. Init error={InitError}, Open error={OpenError}", initError, openError);
+                try { fpm.CloseDevice(); } catch { }
+                _logger.LogDebug("SecuGen device failed to open. Init error={InitError}, Open error={OpenError}", initError, openError);
                 throw new InvalidOperationException($"SecuGen device open failed (error {openError}). Check the reader is plugged in and the driver is installed.");
             }
+
+            _fpm = fpm;
+            _failedFrames = 0;
 
             var info = new SGFPMDeviceInfoParam();
             var infoError = _fpm.GetDeviceInfo(info);
@@ -507,8 +524,13 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
         var error = _fpm.GetImage(image);
 
         // The SDU03P answers this for empty glass, so a lifted finger has to count as "nothing there".
-        if (error == (int)SGFPMError.ERROR_WRONG_IMAGE) return 0;
-        if (error != (int)SGFPMError.ERROR_NONE) return null;
+        if (error == (int)SGFPMError.ERROR_WRONG_IMAGE) { _failedFrames = 0; return 0; }
+        if (error != (int)SGFPMError.ERROR_NONE)
+        {
+            _failedFrames++;
+            return null;
+        }
+        _failedFrames = 0;
 
         var quality = 0;
         _fpm.GetImageQuality(_imageWidth, _imageHeight, image, ref quality);

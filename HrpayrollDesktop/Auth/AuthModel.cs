@@ -58,6 +58,19 @@ public record AttendanceRecord(
     string Status
 );
 
+public record ManualCheckInBody(IReadOnlyCollection<long> EmployeeIds);
+
+/// <summary>What happened to one employee a Branch Manager ticked. ClockInUtc is the instant they were checked in.</summary>
+public record ManualCheckInResult(
+    long EmployeeId,
+    string? EmployeeName,
+    bool CheckedIn,
+    long? AttendanceId,
+    DateTime? ClockIn,
+    DateTime? ClockInUtc,
+    string? Message
+);
+
 public record LoginResult(bool Succeeded, AuthResponse? Session, string? Error)
 {
     public static LoginResult Ok(AuthResponse session) => new(true, session, null);

@@ -30,15 +30,15 @@
                                 </Border>
                                 <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
                                     <TextBlock Text="Dhwarsh HR" Foreground="White" FontSize="16" FontWeight="Bold"/>
-                                    <TextBlock Text="Back Office" Foreground="#D2E4FF" FontSize="11"/>
+                                    <TextBlock x:Name="BrandRoleText" Text="Back Office" Foreground="#D2E4FF" FontSize="11"/>
                                 </StackPanel>
                             </StackPanel>
 
                             <StackPanel Grid.Row="1" VerticalAlignment="Center">
                                 <Image Source="/Assets/3D/worker.png" Width="150" Height="150" HorizontalAlignment="Left" Margin="-6,0,0,14"
                                        RenderOptions.BitmapScalingMode="HighQuality"/>
-                                <TextBlock Text="Your branch, one clear view." Foreground="White" FontSize="22" LineHeight="30" FontWeight="Bold" TextWrapping="Wrap"/>
-                                <TextBlock Text="Attendance, fingerprints, days worked and damages for your branch."
+                                <TextBlock x:Name="BrandHeadlineText" Text="Your branch, one clear view." Foreground="White" FontSize="22" LineHeight="30" FontWeight="Bold" TextWrapping="Wrap"/>
+                                <TextBlock x:Name="BrandBodyText" Text="Attendance, fingerprints, days worked and damages for your branch."
                                            Foreground="#E6F0F8" FontSize="12" LineHeight="18" TextWrapping="Wrap" Margin="0,6,0,0"/>
                             </StackPanel>
 
@@ -56,9 +56,9 @@
                         <Button Style="{StaticResource IconBtn}" Content="&#xE5CD;" HorizontalAlignment="Right" VerticalAlignment="Top"
                                 Margin="0,14,14,0" ToolTip="Back to the attendance screen" Click="BackButton_Click"/>
 
-                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="340">
-                            <TextBlock Text="Back Office sign-in" Style="{StaticResource PageTitle}"/>
-                            <TextBlock Text="Use the username and password your administrator gave you." Style="{StaticResource Sub}" FontSize="12"
+                        <StackPanel x:Name="SignInPanel" VerticalAlignment="Center" HorizontalAlignment="Center" Width="340">
+                            <TextBlock x:Name="FormTitleText" Text="Back Office sign-in" Style="{StaticResource PageTitle}"/>
+                            <TextBlock x:Name="FormSubText" Text="Use the username and password your administrator gave you." Style="{StaticResource Sub}" FontSize="12"
                                        TextWrapping="Wrap" Margin="0,4,0,8"/>
 
                             <TextBlock Text="Username" Style="{StaticResource FieldLabel}"/>
@@ -70,10 +70,19 @@
 
                             <TextBlock Text="Password" Style="{StaticResource FieldLabel}"/>
                             <Grid>
-                                <PasswordBox x:Name="PasswordBox" Padding="38,11,12,11" KeyDown="Field_KeyDown"/>
+                                <PasswordBox x:Name="PasswordBox" Padding="38,11,44,11" KeyDown="Field_KeyDown"/>
+                                <TextBox x:Name="PasswordPlain" Padding="38,11,44,11" KeyDown="Field_KeyDown" Visibility="Collapsed"
+                                         TextChanged="Plain_TextChanged" Tag="PasswordBox"/>
                                 <TextBlock Text="&#xE897;" Style="{StaticResource Icon}" Foreground="{StaticResource MutedBrush}" Margin="12,0,0,0"
                                            HorizontalAlignment="Left" IsHitTestVisible="False"/>
+                                <Button x:Name="PasswordEye" Style="{StaticResource RevealBtn}" Tag="PasswordBox" Click="Reveal_Click"/>
                             </Grid>
+
+                            <Button x:Name="ForgotButton" Style="{StaticResource LinkBtn}" Content="Forgot password?" HorizontalAlignment="Right"
+                                    FontSize="12" Margin="0,8,0,0" Click="Forgot_Click"/>
+
+                            <TextBlock x:Name="InfoText" Foreground="{StaticResource GreenBrush}" FontSize="12" FontWeight="Medium"
+                                       Margin="0,8,0,0" TextWrapping="Wrap" Visibility="Collapsed" TextAlignment="Center"/>
 
                             <TextBlock x:Name="LoadingText" Text="Signing in…" Foreground="{StaticResource BlueBrush}" FontSize="12"
                                        Margin="0,10,0,0" Visibility="Collapsed" HorizontalAlignment="Center"/>
@@ -88,7 +97,101 @@
                             <TextBlock x:Name="StatusText" Foreground="{StaticResource ErrorBrush}" FontSize="12" FontWeight="Medium"
                                        Margin="0,14,0,0" TextWrapping="Wrap" Visibility="Collapsed" TextAlignment="Center"/>
                         </StackPanel>
+
+                        <!-- Forgot password: username or email, then the emailed code -->
+                        <StackPanel x:Name="ResetPanel" VerticalAlignment="Center" HorizontalAlignment="Center" Width="340" Visibility="Collapsed">
+                            <Border Width="46" Height="46" CornerRadius="23" Background="{StaticResource BlueSoftBrush}" HorizontalAlignment="Left" Margin="0,0,0,12">
+                                <TextBlock Text="&#xE897;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource BlueBrush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <TextBlock x:Name="ResetTitleText" Text="Forgot your password?" Style="{StaticResource PageTitle}"/>
+                            <TextBlock x:Name="ResetSubText" Style="{StaticResource Sub}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,8"
+                                       Text="Enter your username or email. We will send a 6-digit code to the email on your account."/>
+
+                            <StackPanel x:Name="IdentifierStep">
+                                <TextBlock Text="Username or email" Style="{StaticResource FieldLabel}"/>
+                                <Grid>
+                                    <TextBox x:Name="IdentifierBox" Padding="38,11,12,11" KeyDown="Identifier_KeyDown"/>
+                                    <TextBlock Text="&#xE7FD;" Style="{StaticResource Icon}" Foreground="{StaticResource MutedBrush}" Margin="12,0,0,0"
+                                               HorizontalAlignment="Left" IsHitTestVisible="False"/>
+                                </Grid>
+                                <Button x:Name="SendCodeButton" Click="SendCode_Click" Margin="0,18,0,0">
+                                    <TextBlock Text="Send code" VerticalAlignment="Center" FontSize="13"/>
+                                </Button>
+                            </StackPanel>
+
+                            <StackPanel x:Name="CodeStep" Visibility="Collapsed">
+                                <TextBlock Text="6-digit code" Style="{StaticResource FieldLabel}"/>
+                                <TextBox x:Name="CodeBox" MaxLength="6" FontSize="24" FontWeight="SemiBold" TextAlignment="Center" Padding="12,8"
+                                         InputMethod.IsInputMethodEnabled="False" PreviewTextInput="Code_PreviewTextInput"
+                                         DataObject.Pasting="Code_Pasting" TextChanged="Code_TextChanged" KeyDown="Code_KeyDown"/>
+                                <TextBlock Text="The code works for 10 minutes. Not there? Check the spam folder." Style="{StaticResource Sub}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                <Button x:Name="VerifyButton" Click="Verify_Click" Margin="0,16,0,0">
+                                    <TextBlock Text="Continue" VerticalAlignment="Center" FontSize="13"/>
+                                </Button>
+                                <Button x:Name="ResendButton" Style="{StaticResource LinkBtn}" Content="Send a new code" HorizontalAlignment="Center"
+                                        FontSize="12" Margin="0,10,0,0" Click="Resend_Click"/>
+                            </StackPanel>
+
+                            <TextBlock x:Name="ResetBusyText" Foreground="{StaticResource BlueBrush}" FontSize="12"
+                                       Margin="0,10,0,0" Visibility="Collapsed" HorizontalAlignment="Center"/>
+                            <TextBlock x:Name="ResetErrorText" Foreground="{StaticResource ErrorBrush}" FontSize="12" FontWeight="Medium"
+                                       Margin="0,10,0,0" TextWrapping="Wrap" Visibility="Collapsed" TextAlignment="Center"/>
+
+                            <Button Style="{StaticResource LinkBtn}" HorizontalAlignment="Left" FontSize="12" Margin="0,16,0,0" Click="BackToSignIn_Click">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE5C4;" Style="{StaticResource Icon}" FontSize="16" Foreground="{StaticResource BlueBrush}" Margin="0,0,6,0"/>
+                                    <TextBlock Text="Back to sign in" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
                     </Grid>
+                </Grid>
+
+                <!-- Pops up once the code is right: the new password, twice -->
+                <Grid x:Name="NewPasswordLayer" Visibility="Collapsed">
+                    <Border CornerRadius="20" Background="#99162B40"/>
+                    <Border x:Name="NewPasswordCard" Width="380" CornerRadius="18" Background="White" Padding="28,24"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" Effect="{StaticResource ShadowLarge}"
+                            RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                        <StackPanel>
+                            <Border Width="46" Height="46" CornerRadius="23" Background="{StaticResource GreenSoftBrush}" HorizontalAlignment="Left" Margin="0,0,0,12">
+                                <TextBlock Text="&#xE8E8;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource GreenBrush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <TextBlock Text="Set a new password" Style="{StaticResource PageTitle}" FontSize="19"/>
+                            <TextBlock Text="Code accepted. Choose a new password and type it again to confirm." Style="{StaticResource Sub}"
+                                       FontSize="12" TextWrapping="Wrap" Margin="0,4,0,6"/>
+
+                            <TextBlock Text="New password" Style="{StaticResource FieldLabel}"/>
+                            <Grid>
+                                <PasswordBox x:Name="NewPasswordBox" Padding="12,11,44,11" KeyDown="NewPassword_KeyDown"/>
+                                <TextBox x:Name="NewPasswordPlain" Padding="12,11,44,11" KeyDown="NewPassword_KeyDown" Visibility="Collapsed"
+                                         TextChanged="Plain_TextChanged" Tag="NewPasswordBox"/>
+                                <Button x:Name="NewPasswordEye" Style="{StaticResource RevealBtn}" Tag="NewPasswordBox" Click="Reveal_Click"/>
+                            </Grid>
+                            <TextBlock Text="At least 8 characters, with an uppercase letter, a lowercase letter and a number."
+                                       Style="{StaticResource Sub}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0"/>
+
+                            <TextBlock Text="Confirm new password" Style="{StaticResource FieldLabel}"/>
+                            <Grid>
+                                <PasswordBox x:Name="ConfirmPasswordBox" Padding="12,11,44,11" KeyDown="NewPassword_KeyDown"/>
+                                <TextBox x:Name="ConfirmPasswordPlain" Padding="12,11,44,11" KeyDown="NewPassword_KeyDown" Visibility="Collapsed"
+                                         TextChanged="Plain_TextChanged" Tag="ConfirmPasswordBox"/>
+                                <Button x:Name="ConfirmPasswordEye" Style="{StaticResource RevealBtn}" Tag="ConfirmPasswordBox" Click="Reveal_Click"/>
+                            </Grid>
+
+                            <TextBlock x:Name="NewPasswordErrorText" Foreground="{StaticResource ErrorBrush}" FontSize="12" FontWeight="Medium"
+                                       Margin="0,10,0,0" TextWrapping="Wrap" Visibility="Collapsed"/>
+
+                            <Button x:Name="SavePasswordButton" Click="SavePassword_Click" Margin="0,18,0,0">
+                                <TextBlock x:Name="SavePasswordText" Text="Save new password" VerticalAlignment="Center" FontSize="13"/>
+                            </Button>
+                            <Button x:Name="CancelPasswordButton" Style="{StaticResource GhostBtn}" Content="Cancel" Margin="0,10,0,0" Click="CancelNewPassword_Click"/>
+                        </StackPanel>
+                    </Border>
                 </Grid>
             </Grid>
         </Viewbox>

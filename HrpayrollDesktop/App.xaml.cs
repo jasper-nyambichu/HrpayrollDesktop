@@ -22,10 +22,39 @@ public partial class App : System.Windows.Application
 {
     private IHost? _host;
 
+    // One copy per PC: two would fight over the reader and the scan databases. The installer also uses this name.
+    private const string SingleInstanceName = @"Global\DhwarshHR.Attendance";
+    private static System.Threading.Mutex? _singleInstance;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hWnd);
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+        _singleInstance = new System.Threading.Mutex(true, SingleInstanceName, out var firstCopy);
+        if (!firstCopy)
+        {
+            // Already running (it starts with Windows): bring that window forward instead of opening a second one.
+            var me = System.Diagnostics.Process.GetCurrentProcess();
+            foreach (var other in System.Diagnostics.Process.GetProcessesByName(me.ProcessName))
+            {
+                if (other.Id == me.Id || other.MainWindowHandle == IntPtr.Zero) continue;
+                if (IsIconic(other.MainWindowHandle)) ShowWindow(other.MainWindowHandle, 9);   // SW_RESTORE, back to maximized
+                SetForegroundWindow(other.MainWindowHandle);
+                break;
+            }
+            Shutdown();
+            return;
+        }
 
         Current.DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnAppDomainUnhandledException;
@@ -130,7 +159,7 @@ public partial class App : System.Windows.Application
     {
         try
         {
-            var logPath = Path.Combine(AppContext.BaseDirectory, "crash.log");
+            var logPath = Path.Combine(HrpayrollDesktop.Config.AppPaths.DataDirectory, "crash.log");
             File.AppendAllText(logPath, $"{DateTime.UtcNow:O} [{source}] {ex}\n\n");
         }
         catch

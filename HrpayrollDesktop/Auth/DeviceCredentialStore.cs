@@ -10,7 +10,7 @@ public record DeviceCredentials(string DeviceSerial, string DeviceToken);
 public static class DeviceCredentialStore
 {
     private static readonly string StorePath =
-        Path.Combine(AppContext.BaseDirectory, "device-credentials.dat");
+        HrpayrollDesktop.Config.AppPaths.Data("device-credentials.dat");
 
     public static DeviceCredentials? TryLoad()
     {

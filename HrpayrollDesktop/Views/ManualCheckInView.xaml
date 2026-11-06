@@ -1,0 +1,164 @@
+<UserControl x:Class="HrpayrollDesktop.ManualCheckInView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <!-- One employee: the whole row is the tick box -->
+        <Style x:Key="PickRow" TargetType="ToggleButton">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" CornerRadius="12" Padding="14,10" Margin="0,0,0,6" Background="White"
+                                BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border x:Name="Box" Width="22" Height="22" CornerRadius="6" BorderThickness="2"
+                                        BorderBrush="{StaticResource OutlineBrush}" Background="White" VerticalAlignment="Center">
+                                    <TextBlock x:Name="Tick" Text="&#xE5CA;" Style="{StaticResource Icon}" FontSize="16" Foreground="White"
+                                               HorizontalAlignment="Center" Visibility="Collapsed"/>
+                                </Border>
+                                <ContentPresenter Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BlueBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource BlueSoftBrush}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BlueBrush}"/>
+                                <Setter TargetName="Box" Property="Background" Value="{StaticResource BlueBrush}"/>
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource BlueBrush}"/>
+                                <Setter TargetName="Tick" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Cursor" Value="Arrow"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceLowBrush}"/>
+                                <Setter TargetName="Box" Property="Opacity" Value="0.35"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid Margin="28,22,28,22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Grid>
+            <StackPanel Orientation="Horizontal">
+                <Border Width="48" Height="48" CornerRadius="14" Background="{StaticResource BlueFixedBrush}">
+                    <TextBlock Text="&#xE174;" Style="{StaticResource Icon}" FontSize="26" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center"/>
+                </Border>
+                <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="Manual check-in" Style="{StaticResource PageTitle}" FontSize="20"/>
+                    <TextBlock x:Name="SubtitleText" Style="{StaticResource Sub}" TextWrapping="Wrap"
+                               Text="For when the fingerprint reader can't be used. Tick who is here, then check them in."/>
+                </StackPanel>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Border CornerRadius="15" Padding="12,7" Background="{StaticResource BlueSoftBrush}" Margin="0,0,10,0">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE7FD;" Style="{StaticResource Icon}" FontSize="15" Foreground="{StaticResource BlueBrush}"/>
+                        <TextBlock x:Name="ManagerNameText" FontSize="11" FontWeight="Medium" Foreground="{StaticResource BlueBrush}"
+                                   Margin="6,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
+                <Button Style="{StaticResource GhostBtn}" Click="Done_Click" ToolTip="Sign out and go back to the attendance screen">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE9BA;" Style="{StaticResource Icon}" FontSize="16"/>
+                        <TextBlock Text="Done" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- Search and quick select -->
+        <Grid Grid.Row="1" Margin="0,18,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MaxWidth="420"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Border Style="{StaticResource InputShell}" Height="40">
+                <Grid>
+                    <TextBlock Text="&#xE8B6;" Style="{StaticResource Icon}" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Left"/>
+                    <TextBox x:Name="SearchBox" Style="{StaticResource InputBox}" Margin="26,0,0,0" TextChanged="SearchBox_TextChanged"/>
+                    <TextBlock x:Name="SearchPlaceholder" Text="Type a name or employee number" Margin="26,0,0,0" Foreground="{StaticResource MutedBrush}"
+                               FontSize="12" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                </Grid>
+            </Border>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Button x:Name="SelectAllButton" Style="{StaticResource LinkBtn}" Content="Tick everyone not in yet" Click="SelectAll_Click" Margin="0,0,16,0"/>
+                <Button x:Name="ClearButton" Style="{StaticResource LinkBtn}" Content="Clear ticks" Click="Clear_Click" Margin="0,0,16,0"/>
+                <Button Style="{StaticResource LinkBtn}" Content="Refresh" Click="Refresh_Click"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- The branch's employees -->
+        <Grid Grid.Row="2">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl x:Name="EmployeeList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <ToggleButton Style="{StaticResource PickRow}" IsChecked="{Binding IsChecked, Mode=TwoWay}" IsEnabled="{Binding CanCheckIn}"
+                                          Click="Row_Click">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="36" Height="36" CornerRadius="18" Background="{Binding AvatarBg}">
+                                        <TextBlock Text="{Binding Initials}" Foreground="{Binding AvatarFg}" FontSize="12" FontWeight="SemiBold"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Margin="12,0,12,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding Detail}" FontSize="11" Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                    <Border Grid.Column="2" CornerRadius="12" Padding="10,4" Background="{Binding StatusBg}" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Status}" FontSize="11" FontWeight="Medium" Foreground="{Binding StatusFg}"/>
+                                    </Border>
+                                </Grid>
+                            </ToggleButton>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <TextBlock x:Name="EmptyText" Style="{StaticResource Sub}" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       TextWrapping="Wrap" TextAlignment="Center" MaxWidth="440" Visibility="Collapsed"/>
+        </Grid>
+
+        <!-- Footer -->
+        <Border Grid.Row="3" Margin="0,14,0,0" Padding="16,12" CornerRadius="14" Background="White" Effect="{StaticResource ShadowSoft}">
+            <Grid>
+                <StackPanel VerticalAlignment="Center" Margin="0,0,220,0">
+                    <TextBlock x:Name="CountText" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
+                    <TextBlock x:Name="StatusText" FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"
+                               Text="Each check-in is recorded at the server's time and kept in the audit trail under your name."/>
+                </StackPanel>
+                <Button x:Name="CheckInButton" HorizontalAlignment="Right" Click="CheckIn_Click" IsEnabled="False">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE174;" Style="{StaticResource Icon}" FontSize="17" Foreground="White"/>
+                        <TextBlock x:Name="CheckInButtonText" Text="Check in" Margin="7,0,0,0" VerticalAlignment="Center" FontSize="13"/>
+                    </StackPanel>
+                </Button>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

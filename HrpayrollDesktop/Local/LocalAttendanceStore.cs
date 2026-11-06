@@ -36,7 +36,7 @@ public class LocalAttendanceStore
     public LocalAttendanceStore(ILogger<LocalAttendanceStore> logger)
     {
         _logger = logger;
-        var dbPath = Path.Combine(AppContext.BaseDirectory, "local-attendance.db");
+        var dbPath = HrpayrollDesktop.Config.AppPaths.Data("local-attendance.db");
         _connectionString = $"Data Source={dbPath}";
     }
 

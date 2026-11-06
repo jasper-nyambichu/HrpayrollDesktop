@@ -1,0 +1,101 @@
+;
+; Installation file (.inf) for the SecuGen FDU04 and SDU04P fingerprint devices.
+;
+; (c) Copyright 2004 - 2025 SecuGen Corp. 
+;
+
+[Version]
+Signature="$Windows NT$"
+Provider=%SecuGen%
+Class=%USBDeviceClassName%
+ClassGuid={88BAE032-5A81-49f0-BC3D-A4FF138216D6}
+DriverVer=12/18/2025,2.6.0.1
+CatalogFile.NT=sgfdu04x64.cat
+PnpLockdown=1
+
+[SourceDisksNames]
+1 = %DISK1%,,,
+
+[SourceDisksFiles]
+sgfdu04x64.sys=1,,
+sgfdu04x64.dll=1,,
+sgfdu04m.dll=1,,
+
+[DestinationDirs]
+DefaultDestDir=10,System32\Drivers
+SGFDU04.Files.Ext = 10,System32\Drivers
+SGFDU04.Files.Dll = 11			; 9x - System Dir, NT - System32 Dir
+SGFDU04.Files.Dll.Wow64 = 10, SysWow64			; Windows\SysWow64
+
+[ControlFlags]
+;ExcludeFromSelect=*             ; removes all device here from the device installer list
+
+[Manufacturer]
+%SecuGen%=SecuGen, NTamd64
+
+[SecuGen.NTamd64]
+;----------------------------------------------------------------
+; FDU04A, SecuGen USB Fx2 mega sensor Fingerprint device, 2006.7
+; SDU04P, 2011.09
+; SDU04P Mouse, 2014.05
+;----------------------------------------------------------------
+%USB\VID_1162&PID_0330.DeviceDesc%=SGFDU04, USB\VID_1162&PID_0330	; FDU04
+%USB\VID_1162&PID_2000.DeviceDesc%=SGFDU04, USB\VID_1162&PID_2000	; SDU04P
+
+%USB\VID_1162&PID_4000&MI_00.DeviceDesc%=SGFDU04, USB\VID_1162&PID_4000&MI_00	; SDU04P Mouse
+%USB\VID_1162&PID_4000&MI_01.DeviceDesc%=SGFPUSBHid, USB\VID_1162&PID_4000&MI_01
+
+
+;-------------------
+; For Windows NT...
+;-------------------
+; =================== HID interface (Win10+) ===================
+[SGFPUSBHid.NT]
+Include=input.inf
+Needs=HID_Inst.NT
+
+[SGFPUSBHid.NT.Services]
+Include=input.inf
+Needs=HID_Inst.NT.Services
+
+
+; =================== FRD (kernel driver) interface (Win10+) ===================
+[SGFDU04.NT]
+CopyFiles=SGFDU04.Files.Ext, SGFDU04.Files.Dll, SGFDU04.Files.Dll.WOW64
+
+[SGFDU04.NT.Services]
+Addservice = SGFDU04, 0x00000002, SGFDU04_AddService_Inst 
+
+[SGFDU04_AddService_Inst]
+DisplayName    = %SGFDU04.SvcDesc%
+ServiceType    = 1                  ; SERVICE_KERNEL_DRIVER
+StartType      = 1                  ; SERVICE_SYSTEM_START 
+ErrorControl   = 0                  ; SERVICE_ERROR_IGNORE
+LoadOrderGroup = Pointer Port
+ServiceBinary  = %12%\sgfdu04x64.sys
+
+[SGFDU04.Files.Ext]
+sgfdu04x64.sys
+
+[SGFDU04.Files.Dll]
+sgfdu04x64.dll
+
+[SGFDU04.Files.Dll.WOW64]
+sgfdu04m.dll
+
+[Strings]
+SecuGen="SecuGen Corporation"
+DISK1="SecuGen Installation Disk"
+SGFDU04.SvcDesc="SecuGen USB FDU04 Service"
+USBDeviceClassName="USBDevice"
+USB\VID_1162&PID_0330.DeviceDesc="SecuGen FDU04A USB mega FRD"
+USB\VID_1162&PID_2000.DeviceDesc="SecuGen SDU04P USB FRD"
+
+;SDU04P Mouse, 2014.05
+USB\VID_1162&PID_4000&MI_00.DeviceDesc="SecuGen SDU04P USB FRD"
+USB\VID_1162&PID_4000&MI_01.DeviceDesc="SecuGen SDU04P USB FRD HID"
+USB\VID_1162&PID_4000.DeviceDesc="SecuGen SDU04P USB FRD Composite"
+
+
+
+

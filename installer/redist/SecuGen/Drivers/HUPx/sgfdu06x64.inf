@@ -1,0 +1,90 @@
+;
+; Installation file (.inf) for the SecuGen FDU06 fingerprint devices.
+;
+; (c) Copyright 2015-2019 SecuGen Corp. 
+
+[Version]
+LayoutFile=Layout.inf, Layout1.inf, Layout2.inf  
+Signature="$Chicago$"
+Provider=%SecuGen%
+Class=%FingerprintClassName%
+ClassGuid={BDE46A98-A497-4034-B7C3-9432E59CCB39}
+DriverVer=11/14/2018,1.3.2.0
+CatalogFile.NT=sgfdu06x64.cat
+
+[ClassInstall32]
+Addreg=FingerprintClassReg
+
+[FingerprintClassReg]
+HKR,,,0,%FingerprintClassName%
+HKR,,Icon,,-20
+
+[PreCopySection]
+HKR,,NoSetupUI,,1
+
+[SourceDisksNames]
+1 = %DISK1%,,,
+
+[SourceDisksFiles]
+sgfdu06x64.sys=1,,
+sgfdu06x64.dll=1,,
+sgfdu06x.dll=1,,
+sgfdu06m.dll=1,,
+
+[DestinationDirs]
+DefaultDestDir=10,System32\Drivers
+SGFDU06.Files.Ext = 10,System32\Drivers
+SGFDU06.Files.Dll = 11			
+SGFDU06.Files.Dll.Wow64 = 10, SysWow64			; Windows\SysWow64
+
+[Manufacturer]
+%SecuGen%=SecuGen, NTamd64
+
+[SecuGen.NTamd64]
+;----------------------------------------------------------------
+; FDU06, SecuGen USB UPX Sensor Fingerprint device, October 2015
+;----------------------------------------------------------------
+%USB\VID_1162&PID_2201.DeviceDesc%=SGFDU06, USB\VID_1162&PID_2201	; FDU06 UPX
+%USB\VID_1162&PID_2301.DeviceDesc%=SGFDU06, USB\VID_1162&PID_2301 	; FDU06 UPX-P, 11/7/2018
+
+[SGFDU06]
+CopyFiles=SGFDU06.Files.Ext, SGFDU06.Files.Dll, SGFDU06.Files.Dll.WOW64
+AddReg=SGFDU06.AddReg
+
+[SGFDU06.AddReg]
+HKR,,DevLoader,,*ntkern
+HKR,,NTMPDriver,,sgfdu06x64.sys
+
+[SGFDU06.Files.Ext]
+sgfdu06x64.sys
+
+[SGFDU06.Files.Dll]
+sgfdu06x64.dll
+
+[SGFDU06.Files.Dll.WOW64]
+sgfdu06m.dll
+
+;--------
+; FRD
+;--------
+[SGFDU06.NT]
+CopyFiles=SGFDU06.Files.Ext, SGFDU06.Files.Dll, SGFDU06.Files.Dll.WOW64
+
+[SGFDU06.NT.Services]
+Addservice = SGFDU06, 0x00000002, SGFDU06_AddService_Inst 
+
+[SGFDU06_AddService_Inst]
+DisplayName    = %SGFDU06.SvcDesc%
+ServiceType    = 1                  ; SERVICE_KERNEL_DRIVER
+StartType      = 1                  ; SERVICE_SYSTEM_START 
+ErrorControl   = 0                  ; SERVICE_ERROR_IGNORE
+LoadOrderGroup = Pointer Port
+ServiceBinary  = %12%\sgfdu06x64.sys
+
+[Strings]
+SecuGen="SecuGen Corporation"
+DISK1="SecuGen Installation Disk"
+SGFDU06.SvcDesc="SecuGen USB FDU06 Service"
+FingerprintClassName="Fingerprint devices"
+USB\VID_1162&PID_2201.DeviceDesc="SecuGen UPx USB FRD"
+USB\VID_1162&PID_2301.DeviceDesc="SecuGen UPx-P USB FRD"

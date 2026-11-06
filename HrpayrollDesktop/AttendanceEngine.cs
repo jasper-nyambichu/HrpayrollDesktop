@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
+using System.Net.NetworkInformation;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -32,6 +33,10 @@ public class AttendanceEngine : BackgroundService
     // How often the kiosk refreshes employee names, mappings and fingerprints from the server (also a
     // "device online" heartbeat). This is also the longest someone moved here waits to be recognised.
     private static readonly TimeSpan MappingRefreshInterval = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan OfflineRetryInterval = TimeSpan.FromSeconds(5);
+
+    // How often a missing reader is looked for, so plugging it in (or back in) needs no restart.
+    private static readonly TimeSpan ReaderRetryInterval = TimeSpan.FromSeconds(5);
 
     private readonly ILogger<AttendanceEngine> _logger;
     private readonly ITerminalAdapter _terminalAdapter;
@@ -68,6 +73,34 @@ public class AttendanceEngine : BackgroundService
 
     public DateTime? LastSyncSuccessUtc { get; private set; }
     public string? LastSyncError { get; private set; }
+
+    /// <summary>True once the server has answered, false while it can't be reached, null until it has been tried.</summary>
+    public bool? ServerReachable { get; private set; }
+
+    /// <summary>Raised after every sync attempt, so screens showing the sync state can refresh straight away.</summary>
+    public event Action? SyncStateChanged;
+
+    /// <summary>Scans still on their way to the server, oldest first.</summary>
+    public List<QueuedEvent> GetUnsentScans() => _queueStore.GetAllPending();
+
+    /// <summary>Scans the server refused, newest first, with the reason it gave.</summary>
+    public List<QueuedEvent> GetRejectedScans() => _queueStore.GetRejected();
+
+    // Lets the sync loop run now instead of waiting out its interval.
+    private readonly SemaphoreSlim _syncWake = new(0, 1);
+
+    /// <summary>Sends waiting scans now: after a scan, when the network comes back, or when someone asks.</summary>
+    public void SyncSoon()
+    {
+        try
+        {
+            if (_syncWake.CurrentCount == 0) _syncWake.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+            // Already due to run.
+        }
+    }
 
     /// <summary>Forces the next sync cycle to immediately re-fetch employee mappings from the server.</summary>
     public void InvalidateMappingCache() => _lastMappingAttemptUtc = DateTime.MinValue;
@@ -126,6 +159,16 @@ public class AttendanceEngine : BackgroundService
         _terminalAdapter.FingerNotRecognized += () => FingerNotRecognized?.Invoke();
         _terminalAdapter.FingerRemoved += () => FingerRemoved?.Invoke();
         _terminalAdapter.FingerPoorQuality += () => FingerPoorQuality?.Invoke();
+
+        // Back online: send what was saved while offline without waiting for the next interval. Availability only
+        // changes when a cable or Wi-Fi comes back; an address change also covers the VPN (Tailscale) reconnecting.
+        NetworkChange.NetworkAvailabilityChanged += (_, e) =>
+        {
+            if (!e.IsAvailable) return;
+            InvalidateMappingCache();
+            SyncSoon();
+        };
+        NetworkChange.NetworkAddressChanged += (_, _) => SyncSoon();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -133,29 +176,79 @@ public class AttendanceEngine : BackgroundService
         _queueStore.Initialize();
         _localStore.Initialize();
 
-        try
-        {
-            await _terminalAdapter.ConnectAsync(stoppingToken);
-            DeviceConnected = true;
-            DeviceReady?.Invoke();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Device failed to connect at startup. Continuing without biometric capture.");
-            DeviceConnected = false;
-            DeviceFault?.Invoke(ex.Message);
-        }
-
-        var pollingLoop = DeviceConnected ? RunPollingLoopAsync(stoppingToken) : Task.CompletedTask;
+        var readerLoop = RunReaderLoopAsync(stoppingToken);
         var syncLoop = RunSyncLoopAsync(stoppingToken);
 
-        await Task.WhenAll(pollingLoop, syncLoop);
+        await Task.WhenAll(readerLoop, syncLoop);
     }
 
+    // Keeps looking for the reader until it is plugged in, reads it while it answers, and looks again if it is
+    // unplugged. Saved scans keep syncing meanwhile, and the manual check-in list works without the reader.
+    private async Task RunReaderLoopAsync(CancellationToken stoppingToken)
+    {
+        var faultShown = false;
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await _terminalAdapter.ConnectAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                DeviceConnected = false;
+                if (!faultShown)
+                {
+                    _logger.LogWarning(ex, "Fingerprint reader not available; looking for it every {Seconds}s.", ReaderRetryInterval.TotalSeconds);
+                    DeviceFault?.Invoke(ex.Message);
+                    faultShown = true;
+                }
+
+                if (!await DelayAsync(ReaderRetryInterval, stoppingToken)) return;
+                continue;
+            }
+
+            faultShown = false;
+            DeviceConnected = true;
+            DeviceReady?.Invoke();
+            InvalidateMappingCache();   // load this branch's fingerprints into the reader straight away
+            SyncSoon();
+
+            await RunPollingLoopAsync(stoppingToken);
+            if (stoppingToken.IsCancellationRequested) return;
+
+            DeviceConnected = false;
+            _logger.LogWarning("The fingerprint reader stopped answering; it will be reopened when it is back.");
+            DeviceFault?.Invoke("The fingerprint reader was disconnected. Plug it back in and it reconnects by itself.");
+            faultShown = true;
+            if (!await DelayAsync(ReaderRetryInterval, stoppingToken)) return;
+        }
+    }
+
+    private static async Task<bool> DelayAsync(TimeSpan delay, CancellationToken stoppingToken)
+    {
+        try
+        {
+            await Task.Delay(delay, stoppingToken);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    // Returns when the reader has been lost, or when the app is closing.
     private async Task RunPollingLoopAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
+            if (_terminalAdapter.IsDeviceLost) return;
+
             try
             {
                 await PollTerminalAsync(stoppingToken);
@@ -181,8 +274,10 @@ public class AttendanceEngine : BackgroundService
         {
             try
             {
-                await RefreshMappingsIfDueAsync(stoppingToken);
+                // Saved scans go first: after time offline, attendance must reach the server before anything
+                // else, such as names and fingerprints, which can take a while to download.
                 await SyncPendingAsync(stoppingToken);
+                await RefreshMappingsIfDueAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -193,7 +288,12 @@ public class AttendanceEngine : BackgroundService
                 _logger.LogWarning(ex, "Unexpected error in sync loop; will retry next cycle.");
             }
 
-            await Task.Delay(interval, stoppingToken);
+            try { SyncStateChanged?.Invoke(); } catch (Exception ex) { _logger.LogDebug("A sync-state handler threw: {Reason}", ex.Message); }
+
+            // While the server can't be reached, look again every few seconds, so scans saved offline are sent
+            // within moments of the connection coming back.
+            var wait = ServerReachable == false && _queueStore.GetPendingCount() > 0 ? OfflineRetryInterval : interval;
+            await _syncWake.WaitAsync(wait, stoppingToken);
         }
     }
 
@@ -270,6 +370,7 @@ public class AttendanceEngine : BackgroundService
         _localStore.AppendLog(evt.EventId, evt.TerminalUserId, eventType, evt.Timestamp, expectedBackUtc, reason);
 
         _logger.LogInformation("Queued event {EventId} ({EventType})", evt.EventId, eventType);
+        SyncSoon();   // online, the web sees the scan within seconds; offline, it simply stays saved
     }
 
     /// <summary>Goes to lunch from the moment of the scan. Returns when they are due back, or null if nothing was waiting.</summary>
@@ -284,13 +385,18 @@ public class AttendanceEngine : BackgroundService
     }
 
     /// <summary>A temporary check-out, which is never counted as late. Returns false if nothing was waiting.</summary>
-    public bool ChooseTemporaryCheckout(string reason, DateTime expectedBackUtc)
+    /// <summary>
+    /// A temporary check-out for the number of minutes the employee typed, counted from the scan, which is never
+    /// counted as late. Returns when they are due back, or null if nothing was waiting.
+    /// </summary>
+    public DateTime? ChooseTemporaryCheckout(string reason, int minutes)
     {
         var evt = TakePendingChoice();
-        if (evt is null) return false;
+        if (evt is null) return null;
 
-        Record(evt, "EMERGENCY_OUT", expectedBackUtc, reason);
-        return true;
+        var due = evt.Timestamp.ToUniversalTime().AddMinutes(minutes);
+        Record(evt, "EMERGENCY_OUT", due, reason);
+        return due;
     }
 
     /// <summary>Finishes the day. Returns false if nothing was waiting.</summary>
@@ -382,6 +488,7 @@ public class AttendanceEngine : BackgroundService
         {
             var mappings = await _apiClient.GetDeviceMappingsAsync(stoppingToken);
             if (mappings is null) return;
+            ServerReachable = true;
 
             var entries = mappings
                 .Where(m => !string.IsNullOrWhiteSpace(m.EmployeeName))
@@ -404,6 +511,7 @@ public class AttendanceEngine : BackgroundService
         }
         catch (Exception ex)
         {
+            if (ex is HttpRequestException or TaskCanceledException) ServerReachable = false;
             _logger.LogDebug("Mapping refresh skipped: {Reason}", ex.Message);
         }
     }
@@ -449,8 +557,23 @@ public class AttendanceEngine : BackgroundService
         if (depth >= QueueDepthWarningThreshold)
             _logger.LogWarning("Offline queue depth is {Depth} — this device may have been offline a long time.", depth);
 
-        foreach (var queued in _queueStore.GetPending())
+        // Batch after batch until nothing is due, so a long offline backlog goes in one go, not 20 per interval.
+        // Each pass makes progress: sent scans are removed, and failed ones wait out their back-off.
+        for (var batch = _queueStore.GetPending(); batch.Count > 0; batch = _queueStore.GetPending())
         {
+            if (!await SyncBatchAsync(batch, stoppingToken)) return;
+        }
+    }
+
+    // False when sending has to stop for now (offline, or the server refuses this reader).
+    private async Task<bool> SyncBatchAsync(List<QueuedEvent> batch, CancellationToken stoppingToken)
+    {
+        // Someone whose earlier scan failed just now: their later scans wait, so they reach the server in order.
+        var heldBack = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var queued in batch)
+        {
+            if (heldBack.Contains(queued.TerminalUserId)) continue;
             SyncResult result;
 
             try
@@ -461,28 +584,32 @@ public class AttendanceEngine : BackgroundService
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                return;
+                return false;
             }
             catch (InvalidOperationException ex)
             {
-                // Device credentials not configured yet.
-                LastSyncError = "Device credentials are not configured.";
+                // This PC's reader hasn't been activated yet.
+                LastSyncError = "This computer isn't activated yet. A Back Office signing in here activates it; scans are kept until then.";
                 _logger.LogDebug("Sync skipped: {Reason}", ex.Message);
-                return;
+                return false;
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
             {
                 // Offline / server unreachable: scans stay safely queued; stop this cycle, no penalty.
+                ServerReachable = false;
                 LastSyncError = "Can't reach the server — scans are saved and will sync automatically.";
                 _logger.LogInformation("Server unreachable, will retry: {Reason}", ex.Message);
-                return;
+                return false;
             }
             catch (Exception ex)
             {
                 _queueStore.MarkRetry(queued.Id, ex.Message);
+                heldBack.Add(queued.TerminalUserId);
                 _logger.LogWarning(ex, "Unexpected error syncing {EventId}, will retry with backoff", queued.EventId);
                 continue;
             }
+
+            ServerReachable = true;   // it answered, whatever it said
 
             if (result.Succeeded)
             {
@@ -496,10 +623,10 @@ public class AttendanceEngine : BackgroundService
             if (result.ShouldPauseSync)
             {
                 LastSyncError = result.StatusCode is 401 or 403
-                    ? "The server rejected this device's credentials. Check the device serial and token."
+                    ? "The server no longer accepts this computer's reader, usually because it was set up on another computer. A Back Office signing in here fixes it; scans are kept until then."
                     : "The server is temporarily unavailable — will retry.";
                 _logger.LogWarning("Sync paused ({Status}): {Error}", result.StatusCode, result.Error);
-                return;
+                return false;
             }
 
             if (result.IsPermanentRejection)
@@ -510,8 +637,11 @@ public class AttendanceEngine : BackgroundService
             }
 
             _queueStore.MarkRetry(queued.Id, result.Error ?? "Unknown error");
+            heldBack.Add(queued.TerminalUserId);
             _logger.LogWarning("Sync failed for {EventId}, will retry with backoff: {Error}", queued.EventId, result.Error);
         }
+
+        return true;
     }
 }
 

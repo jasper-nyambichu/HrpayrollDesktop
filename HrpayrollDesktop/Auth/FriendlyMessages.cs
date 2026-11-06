@@ -14,6 +14,15 @@ public static class FriendlyMessages
 
         return text switch
         {
+            // Scans the server refused (shown in the kiosk's sync status). Specific ones first.
+            var t when t.Contains("Unknown device") => "The server doesn't know this reader. A Back Office needs to sign in here to register it again.",
+            var t when t.Contains("No open clock-in found for this employee to step out") => "The server has no check-in for this person that day, so the break couldn't be recorded.",
+            var t when t.Contains("No open clock-in found for this employee to return") => "The server has no check-in for this person that day, so coming back couldn't be recorded.",
+            var t when t.Contains("already out and has not scanned back in") => "The server already has this person out on a break.",
+            var t when t.Contains("not out on a break") => "The server doesn't have this person out on a break.",
+            var t when t.Contains("return time must be later the same day") => "The time away has to end the same day.",
+            var t when t.Contains("A return time is required") => "The minutes away were missing. This app needs updating.",
+            var t when t.Contains("Unsupported event type") => "The server is older than this app. It needs updating before these scans can be accepted.",
             var t when t.Contains("Fingerprint storage is not set up") => "Fingerprints can't be saved until the server is set up for them. Contact your administrator.",
             var t when t.Contains("does not belong to the branch") => "This employee doesn't work at the branch this reader belongs to.",
             var t when t.Contains("own branch's device") => "This reader belongs to a different branch. Use your own branch's computer.",

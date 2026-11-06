@@ -37,6 +37,7 @@
                 <Grid>
                     <local:KioskView x:Name="Kiosk"/>
                     <local:ConsoleView x:Name="ManagerConsole" Visibility="Collapsed"/>
+                    <local:ManualCheckInView x:Name="ManualCheckIn" Visibility="Collapsed"/>
                 </Grid>
             </Border>
         </Grid>

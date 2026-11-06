@@ -236,6 +236,24 @@ public class LocalAttendanceStore
         return reader.Read() ? ReadEntry(reader) : null;
     }
 
+    /// <summary>Whether this person has a scan of this kind today, for example lunch, which is once a day.</summary>
+    public bool HasEventToday(string terminalUserId, string eventType)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT 1 FROM attendance_log
+            WHERE TerminalUserId = $id AND Timestamp >= $start AND EventType = $type
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$id", terminalUserId);
+        command.Parameters.AddWithValue("$start", DateTime.Today.ToUniversalTime().ToString("O"));
+        command.Parameters.AddWithValue("$type", eventType);
+        return command.ExecuteScalar() is not null;
+    }
+
     public AttendanceLogEntry? GetLatestClockInToday(string terminalUserId)
     {
         using var connection = new SqliteConnection(_connectionString);

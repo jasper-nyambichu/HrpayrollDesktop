@@ -51,6 +51,7 @@ public class AttendanceEngine : BackgroundService
     public event Action<string, string, DateTime>? DuplicateScan;   // terminalUserId, lastEventType, lastTimestampUtc
     public event Action<ScanChoiceRequest>? ChoiceRequired;         // someone at work scanned: lunch, temporary check-out or clock out?
     public event Action<BreakReturn>? ReturnedFromBreak;             // someone out on a break scanned back in
+    public event Action<string, DateTime, DateTime>? LunchNotOver;   // terminalUserId, lunch started (UTC), lunch ends (UTC): nothing recorded
     public event Action? FingerCaptured;
     public event Action? FingerNotRecognized;
     public event Action? FingerRemoved;
@@ -178,8 +179,45 @@ public class AttendanceEngine : BackgroundService
 
         var readerLoop = RunReaderLoopAsync(stoppingToken);
         var syncLoop = RunSyncLoopAsync(stoppingToken);
+        var heartbeatLoop = RunHeartbeatLoopAsync(stoppingToken);
 
-        await Task.WhenAll(readerLoop, syncLoop);
+        await Task.WhenAll(readerLoop, syncLoop, heartbeatLoop);
+    }
+
+    // ----- Heartbeat: the web sees whether this PC is up and its reader plugged in -----
+
+    private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromMinutes(1);
+    private static readonly string AppVersion =
+        typeof(AttendanceEngine).Assembly.GetName().Version?.ToString(3) ?? "unknown";
+    private readonly SemaphoreSlim _heartbeatWake = new(0, 1);
+
+    /// <summary>Reports straight away instead of at the next minute, e.g. when the reader is plugged in or out.</summary>
+    public void HeartbeatSoon()
+    {
+        try { if (_heartbeatWake.CurrentCount == 0) _heartbeatWake.Release(); }
+        catch (SemaphoreFullException) { }
+    }
+
+    private async Task RunHeartbeatLoopAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await _apiClient.SendHeartbeatAsync(DeviceConnected, AppVersion, _queueStore.GetPendingCount(), stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug("Heartbeat skipped: {Reason}", ex.Message);
+            }
+
+            try { await _heartbeatWake.WaitAsync(HeartbeatInterval, stoppingToken); }
+            catch (OperationCanceledException) { return; }
+        }
     }
 
     // Keeps looking for the reader until it is plugged in, reads it while it answers, and looks again if it is
@@ -206,6 +244,7 @@ public class AttendanceEngine : BackgroundService
                     _logger.LogWarning(ex, "Fingerprint reader not available; looking for it every {Seconds}s.", ReaderRetryInterval.TotalSeconds);
                     DeviceFault?.Invoke(ex.Message);
                     faultShown = true;
+                    HeartbeatSoon();   // the web shows the reader as unplugged straight away
                 }
 
                 if (!await DelayAsync(ReaderRetryInterval, stoppingToken)) return;
@@ -217,6 +256,7 @@ public class AttendanceEngine : BackgroundService
             DeviceReady?.Invoke();
             InvalidateMappingCache();   // load this branch's fingerprints into the reader straight away
             SyncSoon();
+            HeartbeatSoon();
 
             await RunPollingLoopAsync(stoppingToken);
             if (stoppingToken.IsCancellationRequested) return;
@@ -225,6 +265,7 @@ public class AttendanceEngine : BackgroundService
             _logger.LogWarning("The fingerprint reader stopped answering; it will be reopened when it is back.");
             DeviceFault?.Invoke("The fingerprint reader was disconnected. Plug it back in and it reconnects by itself.");
             faultShown = true;
+            HeartbeatSoon();
             if (!await DelayAsync(ReaderRetryInterval, stoppingToken)) return;
         }
     }
@@ -337,10 +378,25 @@ public class AttendanceEngine : BackgroundService
                     _pendingChoice = evt;
                 }
                 ChoiceRequired?.Invoke(new ScanChoiceRequest(evt.TerminalUserId, evt.Timestamp,
-                    _localStore.GetLatestClockInToday(evt.TerminalUserId)?.TimestampUtc));
+                    _localStore.GetLatestClockInToday(evt.TerminalUserId)?.TimestampUtc,
+                    _localStore.HasEventToday(evt.TerminalUserId, "LUNCH_OUT")));
                 break;
 
             case "LUNCH_OUT":
+            {
+                // Lunch is a full 30 minutes: scanning before it is over records nothing, it only says when it ends.
+                var lunchEnds = last.ExpectedBackUtc ?? last.TimestampUtc + LunchAllowance;
+                if (evt.Timestamp.ToUniversalTime() < lunchEnds.ToUniversalTime())
+                {
+                    LunchNotOver?.Invoke(evt.TerminalUserId, last.TimestampUtc, lunchEnds);
+                    break;
+                }
+                Record(evt, "BREAK_RETURN");
+                ReturnedFromBreak?.Invoke(new BreakReturn(evt.TerminalUserId, WasLunch: true,
+                    last.TimestampUtc, evt.Timestamp, last.ExpectedBackUtc));
+                break;
+            }
+
             case "EMERGENCY_OUT":
                 Record(evt, "BREAK_RETURN");
                 ReturnedFromBreak?.Invoke(new BreakReturn(evt.TerminalUserId, last.EventType == "LUNCH_OUT",
@@ -378,6 +434,7 @@ public class AttendanceEngine : BackgroundService
     {
         var evt = TakePendingChoice();
         if (evt is null) return null;
+        if (_localStore.HasEventToday(evt.TerminalUserId, "LUNCH_OUT")) return null;   // once a day
 
         var due = evt.Timestamp + LunchAllowance;
         Record(evt, "LUNCH_OUT", due);
@@ -646,7 +703,7 @@ public class AttendanceEngine : BackgroundService
 }
 
 /// <summary>Someone already at work scanned, so they choose what happens next on screen.</summary>
-public sealed record ScanChoiceRequest(string TerminalUserId, DateTime ScannedAtUtc, DateTime? ClockedInAtUtc);
+public sealed record ScanChoiceRequest(string TerminalUserId, DateTime ScannedAtUtc, DateTime? ClockedInAtUtc, bool LunchTaken = false);
 
 /// <summary>Someone came back from lunch or a temporary check-out.</summary>
 public sealed record BreakReturn(string TerminalUserId, bool WasLunch, DateTime LeftAtUtc, DateTime BackAtUtc, DateTime? ExpectedBackUtc);

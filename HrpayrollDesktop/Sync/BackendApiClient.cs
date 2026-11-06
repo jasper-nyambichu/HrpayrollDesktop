@@ -309,6 +309,25 @@ public class BackendApiClient
     }
 
     /// <summary>
+    /// Tells the server this PC is running, whether its reader is plugged in, and how many scans it still holds,
+    /// so the web shows an unplugged reader or a quiet PC. True when the server took it.
+    /// </summary>
+    public async Task<bool> SendHeartbeatAsync(bool readerConnected, string appVersion, int pendingScans, CancellationToken cancellationToken)
+    {
+        if (_deviceIdentity is null) return false;
+        try
+        {
+            using var response = await _httpClient.PostAsJsonAsync("/attendance/biometric/heartbeat",
+                new { readerConnected, appVersion, pendingScans }, WebJson, cancellationToken);
+            return response.IsSuccessStatusCode;   // an older server answers 404: nothing to do
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Whether the server still accepts this PC's reader key: false when it refuses it (the reader was set up on
     /// another PC since, which issues a new key), null when that can't be told (offline, server fault).
     /// </summary>

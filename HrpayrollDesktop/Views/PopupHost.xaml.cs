@@ -234,7 +234,7 @@ public partial class PopupHost : UserControl
 
     /// <summary>Asks where someone at work is going. The scan records nothing until they answer.</summary>
     public void ShowChoice(string name, string? detail, DateTime scannedAtUtc, DateTime? clockedInAtUtc, DateTime lunchBackAtUtc,
-        Action<ScanChoice, string?, int?> handler)
+        Action<ScanChoice, string?, int?> handler, bool lunchTaken = false)
     {
         // Set straight away: another finger arriving now must not cancel this person's turn.
         _choiceHandler = handler;
@@ -250,7 +250,12 @@ public partial class PopupHost : UserControl
             var since = clockedInAtUtc is { } at ? $"At work since {Clock(at)}" : "You are at work";
             ChoiceSub.Text = string.IsNullOrWhiteSpace(detail) ? since : $"{since}  •  {detail}";
             TemporarySub.Text = name;
-            LunchOptionDetail.Text = $"30 minutes. Be back by {Clock(lunchBackAtUtc)}, or the time you are late is recorded.";
+            // Lunch is once a day.
+            LunchOptionButton.IsEnabled = !lunchTaken;
+            LunchOptionButton.Opacity = lunchTaken ? 0.5 : 1;
+            LunchOptionDetail.Text = lunchTaken
+                ? "You have already had your lunch break today."
+                : $"30 minutes. Be back by {Clock(lunchBackAtUtc)}, or the time you are late is recorded.";
 
             OpenChoice();
             Play(SystemSounds.Asterisk);

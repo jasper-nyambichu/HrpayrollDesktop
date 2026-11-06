@@ -61,6 +61,7 @@ public partial class ShellWindow : Window
         {
             _engine.InvalidateMappingCache();
             _engine.SyncSoon();
+            _engine.HeartbeatSoon();
         };
         ManagerConsole.LockRequested += LockToKiosk;
         ManagerConsole.ExitRequested += ExitApplication;
@@ -75,6 +76,7 @@ public partial class ShellWindow : Window
         engine.DuplicateScan += (userId, lastType, lastTs) => Dispatcher.InvokeAsync(() => OnDuplicate(userId, lastType, lastTs));
         engine.ChoiceRequired += request => Dispatcher.InvokeAsync(() => OnChoiceRequired(request));
         engine.ReturnedFromBreak += back => Dispatcher.InvokeAsync(() => OnReturnedFromBreak(back));
+        engine.LunchNotOver += (userId, started, ends) => Dispatcher.InvokeAsync(() => OnLunchNotOver(userId, started, ends));
         engine.SyncStateChanged += () => Dispatcher.InvokeAsync(RefreshSync);
 
         engine.DeviceReady += () => Dispatcher.InvokeAsync(() =>
@@ -286,7 +288,20 @@ public partial class ShellWindow : Window
         KioskOutcome(true, $"Hello, {PopupHost.FirstName(name)}", "Choose where you are going.");
 
         Popups.ShowChoice(name, detail, request.ScannedAtUtc, request.ClockedInAtUtc, request.ScannedAtUtc + AttendanceEngine.LunchAllowance,
-            (choice, reason, minutes) => OnChoiceMade(request, name, choice, reason, minutes));
+            (choice, reason, minutes) => OnChoiceMade(request, name, choice, reason, minutes), request.LunchTaken);
+    }
+
+    // Scanned before the 30 minutes were up: nothing is recorded, they are told when lunch ends.
+    private void OnLunchNotOver(string terminalUserId, DateTime startedUtc, DateTime endsUtc)
+    {
+        var (name, _) = Resolve(terminalUserId);
+        var first = PopupHost.FirstName(name);
+        var left = endsUtc.ToUniversalTime() - DateTime.UtcNow;
+        var leftText = left.TotalMinutes >= 1 ? $"{(int)Math.Ceiling(left.TotalMinutes)} minute{((int)Math.Ceiling(left.TotalMinutes) == 1 ? "" : "s")}" : "less than a minute";
+        KioskOutcome(false, "Lunch time is not over yet", $"{first}, scan again at {PopupHost.Clock(endsUtc)}.");
+        Popups.ShowMessage(PopupKind.Warning, "Your lunch time is not over yet",
+            $"{first}, your lunch break started at {PopupHost.Clock(startedUtc)} and ends at {PopupHost.Clock(endsUtc)} ({leftText} left). Scan again when it is over.",
+            "Nothing was recorded for this scan.", autoCloseSeconds: 7);
     }
 
     private void OnChoiceMade(ScanChoiceRequest request, string name, ScanChoice choice, string? reason, int? minutes)

@@ -25,6 +25,7 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
     private const int ExtraAttemptDelayMs = 150;
     private const int TemplateSize = 400;
     private const int EnrollTimeoutMs = 5000;
+    private const int EnrollSettleMs = 900;        // after the first readable frame, keep the sharpest of this long
 
     // About 5 seconds of frames the reader refuses to give means it has been unplugged.
     private const int LostAfterFailedFrames = 25;
@@ -65,6 +66,7 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
     private DateTime? _weakSinceUtc;
     private bool _poorQualityRaised;
     private byte[]? _lastTouchTemplate;      // the finger we most recently handled
+    private bool _lastTouchRecognised;       // whether that touch matched someone
     private DateTime _lastTouchUtc = DateTime.MinValue;
     private DateTime _lastHeartbeatUtc = DateTime.MinValue;
 
@@ -226,8 +228,10 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
         if (template is null)
             return Array.Empty<TerminalEvent>();
 
-        // The same finger we just handled bouncing back onto the glass: not a new scan.
+        // The same finger we just recorded bouncing back onto the glass: not a new scan. Only after a recognised
+        // touch: someone whose finger wasn't recognised (or was just enrolled) is trying again and must be read.
         if (_lastTouchTemplate is not null
+            && _lastTouchRecognised
             && (now - _lastTouchUtc).TotalMilliseconds < SameFingerGuardMs
             && Matches(template, _lastTouchTemplate))
         {
@@ -281,6 +285,7 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
         var now = DateTime.UtcNow;
         EnterWaiting(now);
         _lastTouchTemplate = template;
+        _lastTouchRecognised = false;
         _lastTouchUtc = now;
 
         SafeRaise(FingerCaptured);
@@ -316,6 +321,7 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
             return Array.Empty<TerminalEvent>();
         }
 
+        _lastTouchRecognised = true;
         var evt = new TerminalEvent(
             EventId: $"secugen-evt-{Guid.NewGuid():N}",
             TerminalUserId: matchedUserId,
@@ -378,8 +384,11 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
                 SaveBackedUp();
             }
 
-            // The enrolled finger is usually still on the glass: remember it so it isn't scanned as a clock-in.
-            _lastTouchTemplate = template;
+            // The enrolled finger is usually still on the glass: it isn't scanned as a clock-in until it is lifted
+            // (EnterWaiting below). Nothing of it is remembered beyond that, so the very next touch, however quick,
+            // is read and matched: the employee can check in straight after enrolling.
+            _lastTouchTemplate = null;
+            _lastTouchRecognised = false;
 
             _logger.LogInformation("Enrollment successful for terminalUserId={TerminalUserId}.", terminalUserId);
             return true;
@@ -570,24 +579,43 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
         var image = new byte[_imageWidth * _imageHeight];
         var stopwatch = Stopwatch.StartNew();
 
+        // The first readable frame is usually a finger still landing, a partial print that later scans match
+        // poorly. Once one is readable, keep reading while the finger settles and keep the sharpest.
+        byte[]? best = null;
+        var bestQuality = 0;
+        long? settleUntil = null;
+
         do
         {
             var quality = GrabFrame(image);
             if (quality is not null)
             {
-                if (quality > 0 && quality < minQuality)
+                if (quality > 0 && quality < minQuality && best is null)
                     _logger.LogInformation("Finger detected but image quality is low ({Quality}) — press a bit more firmly.", quality);
 
-                if (quality >= minQuality)
+                if (quality >= minQuality && quality > bestQuality)
                 {
                     var template = CreateTemplate(image);
                     if (template is not null)
-                        return template;
+                    {
+                        best = template;
+                        bestQuality = quality.Value;
+                        settleUntil ??= stopwatch.ElapsedMilliseconds + EnrollSettleMs;
+                    }
+                }
+                else if (best is not null && quality < PresenceQuality)
+                {
+                    break;   // lifted: keep what was read
                 }
             }
+
+            if (settleUntil is { } until && stopwatch.ElapsedMilliseconds >= until) break;
+            Thread.Sleep(40);
         } while (stopwatch.ElapsedMilliseconds < timeoutMs);
 
-        return null;
+        if (best is not null)
+            _logger.LogInformation("Enrollment captured at quality {Quality}.", bestQuality);
+        return best;
     }
 
     // Called only while holding _deviceLock (every template mutation holds it too), so iterating is safe.

@@ -24,7 +24,9 @@ namespace HrpayrollDesktop;
 public partial class DamagesView : UserControl
 {
     private sealed record DamageRow(long Id, string Name, string Initials, string Sub, string AmountText,
-        Brush AvatarBg, Brush AvatarFg, DamageItem Damage);
+        Brush AvatarBg, Brush AvatarFg, string StatusText, Brush StatusBg, Brush StatusFg, DamageItem Damage);
+
+    private const string PendingConsent = "PENDING_CONSENT";
 
     private static readonly TimeSpan CaptureTimeout = TimeSpan.FromSeconds(60);
 
@@ -43,6 +45,7 @@ public partial class DamagesView : UserControl
     private List<EmployeeSummary> _employees = new();
     private List<DamageItem> _damages = new();
     private DamageItem? _selected;
+    private string _statusFilter = string.Empty;
 
     private bool _loading;
     private bool _busy;
@@ -122,7 +125,8 @@ public partial class DamagesView : UserControl
 
         try
         {
-            var all = await _apiClient.GetDamagesAsync("PENDING_CONSENT", session.AccessToken, CancellationToken.None);
+            // Every damage at this branch: the server says which ones the Admin's payment run has deducted.
+            var all = await _apiClient.GetDamagesAsync(null, session.AccessToken, CancellationToken.None);
             if (!ReferenceEquals(session, _session)) return;   // signed out while loading
 
             if (all is null)
@@ -132,10 +136,14 @@ public partial class DamagesView : UserControl
                 return;
             }
 
-            // This reader only holds the fingerprints of the people working here now, so those are the damages
-            // that can be agreed here. It includes a damage recorded at their old branch before they moved.
+            // This reader only holds the fingerprints of the people working here now, so a damage awaiting
+            // consent shows only for them (including one recorded at their old branch before they moved).
+            // Approved, deducted and cancelled damages are history and always show.
             var roster = _employees.Select(e => e.Id).ToHashSet();
-            _damages = roster.Count == 0 ? all : all.Where(d => roster.Contains(d.EmployeeId)).ToList();
+            _damages = all
+                .Where(d => d.Status != PendingConsent || roster.Count == 0 || roster.Contains(d.EmployeeId))
+                .OrderByDescending(d => d.DamageDate).ThenByDescending(d => d.Id)
+                .ToList();
 
             long? keep = selectNewest
                 ? _damages.OrderByDescending(d => d.Id).FirstOrDefault()?.Id
@@ -158,17 +166,29 @@ public partial class DamagesView : UserControl
 
     private void BindList(long? selectId)
     {
-        var rows = _damages.Select(d =>
-        {
-            var name = d.EmployeeName ?? $"Employee #{d.EmployeeId}";
-            var (bg, fg) = AvatarColors($"emp-{d.EmployeeId}");
-            var sub = string.Join(" • ", new[] { d.EmployeeNumber, d.DamageDate.ToString("d MMM yyyy", CultureInfo.InvariantCulture) }
-                .Where(s => !string.IsNullOrWhiteSpace(s)));
-            return new DamageRow(d.Id, name, Initials(name), sub, FormatKes(d.Amount), bg, fg, d);
-        }).ToList();
+        var rows = _damages
+            .Where(d => _statusFilter.Length == 0 || d.Status == _statusFilter)
+            .Select(d =>
+            {
+                var name = d.EmployeeName ?? $"Employee #{d.EmployeeId}";
+                var (bg, fg) = AvatarColors($"emp-{d.EmployeeId}");
+                var sub = string.Join(" • ", new[] { d.EmployeeNumber, d.DamageDate.ToString("d MMM yyyy", CultureInfo.InvariantCulture) }
+                    .Where(s => !string.IsNullOrWhiteSpace(s)));
+                var (label, statusBg, statusFg) = StatusLook(d.Status);
+                return new DamageRow(d.Id, name, Initials(name), sub, FormatKes(d.Amount), bg, fg, label, statusBg, statusFg, d);
+            }).ToList();
 
         DamageList.ItemsSource = rows;
-        CountText.Text = rows.Count == 0 ? "Nothing is waiting for consent." : $"{rows.Count} damage(s) awaiting consent";
+        CountText.Text = rows.Count == 0
+            ? (_statusFilter.Length == 0 ? "No damages recorded at this branch yet." : "No damages with this status.")
+            : $"{rows.Count} damage(s)";
+
+        var waiting = _damages.Where(d => d.Status == PendingConsent).ToList();
+        var toDeduct = _damages.Where(d => d.Status == "APPROVED").ToList();
+        var deducted = _damages.Where(d => d.Status == "DEDUCTED").ToList();
+        TotalsText.Text = $"Awaiting consent {waiting.Count} ({FormatKes(waiting.Sum(d => d.Amount))})  •  "
+            + $"To deduct {toDeduct.Count} ({FormatKes(toDeduct.Sum(d => d.Amount))})  •  "
+            + $"Deducted {deducted.Count} ({FormatKes(deducted.Sum(d => d.Amount))})";
 
         if (selectId is long id)
             DamageList.SelectedItem = rows.FirstOrDefault(r => r.Id == id);
@@ -178,6 +198,22 @@ public partial class DamagesView : UserControl
     }
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e) => _ = LoadDamagesAsync();
+
+    private void StatusFilter_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _statusFilter = ((sender as ComboBox)?.SelectedItem as ComboBoxItem)?.Tag as string ?? string.Empty;
+        if (!IsLoaded || _capturing) return;
+        BindList(_selected?.Id);
+    }
+
+    private static (string Label, Brush Bg, Brush Fg) StatusLook(string status) => status switch
+    {
+        PendingConsent => ("Awaiting consent", Br("#FFF4D6"), Br("#8A5F00")),
+        "APPROVED" => ("Approved, to deduct", Br("#D2E4FF"), Br("#005592")),
+        "DEDUCTED" => ("Deducted", Br("#E5F4E2"), Br("#2E7D24")),
+        "CANCELLED" => ("Cancelled", Br("#ECEEF0"), Br("#5B6168")),
+        _ => (status, Br("#ECEEF0"), Br("#5B6168")),
+    };
 
     // ===================================================================
     //  Selection + detail
@@ -207,6 +243,30 @@ public partial class DamagesView : UserControl
         DetailDescriptionText.Text = d.Description;
         DetailDateText.Text = $"Recorded for {d.DamageDate.ToString("dddd, d MMMM yyyy", CultureInfo.InvariantCulture)}";
 
+        var (label, stateBg, stateFg) = StatusLook(d.Status);
+        StateBox.Background = stateBg;
+        StateTitleText.Foreground = stateFg;
+        StateDetailText.Foreground = stateFg;
+        StateTitleText.Text = label;
+        StateDetailText.Text = d.Status switch
+        {
+            PendingConsent => "Nothing is deducted until the employee agrees by fingerprint or you override.",
+            "APPROVED" => (d.Overridden ? "Approved by override. " : "Agreed by fingerprint. ")
+                + "It will be deducted the next time the Admin calculates agent payments.",
+            "DEDUCTED" => "Deducted from the employee's pay by the Admin's payment calculation"
+                + (d.DeductedAt is DateTime when ? $" on {when.ToString("d MMMM yyyy", CultureInfo.InvariantCulture)}" : string.Empty)
+                + (d.PayrollRunId is long run ? $" (payment #{run})." : ".")
+                + " It shows on that employee's payslip.",
+            "CANCELLED" => "Cancelled. It will not be deducted.",
+            _ => string.Empty,
+        };
+
+        var pending = d.Status == PendingConsent;
+        StatusBox.Visibility = pending ? Visibility.Visible : Visibility.Collapsed;
+        CaptureButton.Visibility = pending ? Visibility.Visible : Visibility.Collapsed;
+        OverrideButton.Visibility = pending ? Visibility.Visible : Visibility.Collapsed;
+        CancelDamageButton.Visibility = d.Status is PendingConsent or "APPROVED" ? Visibility.Visible : Visibility.Collapsed;
+
         OverridePanel.Visibility = Visibility.Collapsed;
         ReasonBox.Text = string.Empty;
         ReasonErrorText.Visibility = Visibility.Collapsed;
@@ -220,14 +280,16 @@ public partial class DamagesView : UserControl
     private void ApplyActionState()
     {
         var hasSelection = _selected is not null;
+        var pending = _selected?.Status == PendingConsent;
         var idle = !_capturing && !_busy;
 
-        CaptureButton.Visibility = _capturing ? Visibility.Collapsed : Visibility.Visible;
+        CaptureButton.Visibility = _capturing || !pending ? Visibility.Collapsed : Visibility.Visible;
         StopCaptureButton.Visibility = _capturing ? Visibility.Visible : Visibility.Collapsed;
 
-        CaptureButton.IsEnabled = hasSelection && idle;
-        OverrideButton.IsEnabled = hasSelection && idle;
-        CancelDamageButton.IsEnabled = hasSelection && idle;
+        CaptureButton.IsEnabled = pending && idle;
+        OverrideButton.IsEnabled = pending && idle;
+        CancelDamageButton.IsEnabled = hasSelection && idle && _selected?.Status is PendingConsent or "APPROVED";
+        StatusFilter.IsEnabled = idle;
         ConfirmOverrideButton.IsEnabled = idle;
         RecordSaveButton.IsEnabled = idle;
         RecordToggleButton.IsEnabled = idle;

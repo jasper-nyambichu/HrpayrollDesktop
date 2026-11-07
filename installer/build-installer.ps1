@@ -15,7 +15,7 @@ $redist = Join-Path $here 'redist'
 [xml]$csproj = Get-Content $project
 $version = ($csproj.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1).Version
 if (-not $version) { throw 'No <Version> in HrpayrollDesktop.csproj' }
-Write-Host "Building Dhwarsh HR Attendance $version" -ForegroundColor Cyan
+Write-Host "Building Kisiimatt Management System $version" -ForegroundColor Cyan
 
 # 1. The app, with its own .NET runtime, so the branch PC needs nothing else.
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }

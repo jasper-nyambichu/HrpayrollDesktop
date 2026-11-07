@@ -140,7 +140,7 @@ public partial class App : System.Windows.Application
         LogCrash("UI thread", e.Exception);
         System.Windows.MessageBox.Show(
             "A display error occurred, but attendance tracking is still running in the background. Please restart the app when convenient.",
-            "HR Payroll Desktop", MessageBoxButton.OK, MessageBoxImage.Warning);
+            "Kisiimatt Management System", MessageBoxButton.OK, MessageBoxImage.Warning);
         e.Handled = true;
     }
 

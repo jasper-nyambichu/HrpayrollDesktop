@@ -1,4 +1,4 @@
-; Dhwarsh HR Attendance: the branch PC installer.
+; Kisiimatt Management System (formerly Dhwarsh HR Attendance): the branch PC installer.
 ; Build it with build-installer.ps1, which publishes the app first. One setup .exe installs:
 ;   - the app, with its own .NET runtime (nothing else to install)
 ;   - the SecuGen SDK files the app uses (already in the app folder)
@@ -11,7 +11,9 @@
   #define AppVersion "1.1.0"
 #endif
 
-#define AppName "Dhwarsh HR Attendance"
+#define AppName "Kisiimatt Management System"
+; The name before the rename, so an upgrade removes its old shortcuts.
+#define OldAppName "Dhwarsh HR Attendance"
 #define AppExe "HrpayrollDesktop.exe"
 #define DataDir "{commonappdata}\Dhwarsh HR"
 
@@ -21,10 +23,13 @@ AppId={{B62696C1-198E-4E15-8415-9E78855D6B83}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
-AppPublisher=Dhwarsh
+AppPublisher=Kisiimatt
 VersionInfoVersion={#AppVersion}
 DefaultDirName={autopf}\Dhwarsh HR
-DefaultGroupName=Dhwarsh HR
+; The install folder, data folder, update task and setup file name keep the old name on purpose:
+; installed PCs keep their data and still find their updates.
+DefaultGroupName={#AppName}
+UsePreviousGroup=no
 DisableProgramGroupPage=yes
 ; Drivers and the C++ runtime are machine-wide, so setup needs an administrator.
 PrivilegesRequired=admin
@@ -60,6 +65,12 @@ Source: "redist\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 Source: "updater\update.ps1"; DestDir: "{app}\updater"; Flags: ignoreversion
 Source: "updater\register-tasks.ps1"; DestDir: "{app}\updater"; Flags: ignoreversion
 Source: "updater\update-public-key.xml"; DestDir: "{app}\updater"; Flags: ignoreversion
+
+[InstallDelete]
+; Shortcuts from before the rename to {#AppName}.
+Type: filesandordirs; Name: "{commonprograms}\Dhwarsh HR"
+Type: files; Name: "{autodesktop}\{#OldAppName}.lnk"
+Type: files; Name: "{commonstartup}\{#OldAppName}.lnk"
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"

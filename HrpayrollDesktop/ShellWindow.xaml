@@ -2,9 +2,9 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:HrpayrollDesktop"
-        Title="Dhwarsh HR"
+        Title="Kisiimatt Management System"
         Icon="/Assets/dhwarsh.ico"
-        Width="1280" Height="800" MinWidth="1000" MinHeight="660"
+        Width="1366" Height="768" MinWidth="1200" MinHeight="680"
         WindowState="Maximized" WindowStyle="None" ResizeMode="CanResize"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource OuterBrush}"
@@ -29,7 +29,7 @@
             <!-- Title strip: drag here to move the window -->
             <StackPanel Orientation="Horizontal" Margin="22,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
                 <Image Source="/Assets/dhwarsh-mark.png" Width="20" Height="20" RenderOptions.BitmapScalingMode="HighQuality"/>
-                <TextBlock Text="Dhwarsh HR" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource NavyBrush}" Margin="7,0,0,0" VerticalAlignment="Center"/>
+                <TextBlock Text="Kisiimatt Management System" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource NavyBrush}" Margin="7,0,0,0" VerticalAlignment="Center"/>
             </StackPanel>
 
             <!-- The white panel from the design, floating on the light background -->

@@ -94,6 +94,37 @@ public class BackendApiClient
         return LoginResult.Ok(envelope.Data);
     }
 
+    /// <summary>
+    /// Signs in the Branch Manager or Back Office whose finger this PC just recognised. The PC proves itself with
+    /// its reader key (sent by the device handler); the server checks the finger belongs to that login, at this branch.
+    /// </summary>
+    public async Task<LoginResult> StaffFingerprintLoginAsync(string terminalUserId, string role, CancellationToken cancellationToken)
+    {
+        if (_deviceIdentity is null)
+            return LoginResult.Failure("This computer isn't activated yet. A Back Office must sign in here once with the password.");
+
+        var response = await _httpClient.PostAsJsonAsync("/attendance/biometric/staff-login", new { terminalUserId, role }, WebJson, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("Fingerprint sign-in failed: {StatusCode} {Body}", response.StatusCode, body);
+            var (fromBackend, message) = ReadBackendError(body);
+            return LoginResult.Failure((int)response.StatusCode switch
+            {
+                404 => "This server doesn't support fingerprint sign-in yet. Sign in with your password.",
+                >= 500 => "The server isn't available right now. Please try again shortly.",
+                _ when fromBackend => FriendlyMessages.Translate(message),
+                _ => "The server isn't available right now. Please try again shortly.",
+            });
+        }
+
+        var envelope = JsonSerializer.Deserialize<ApiResponse<AuthResponse>>(body, WebJson);
+        return envelope?.Data is { } session && envelope.Success
+            ? LoginResult.Ok(session)
+            : LoginResult.Failure(envelope?.Message ?? "Sign-in failed.");
+    }
+
     // ----- Forgotten password: the same three steps as the web sign-in pages -----
 
     /// <summary>
@@ -427,9 +458,11 @@ public class BackendApiClient
     }
 
     /// <summary>Damages with the given status (e.g. PENDING_CONSENT), newest first. Null when they can't be loaded.</summary>
-    public async Task<List<DamageItem>?> GetDamagesAsync(string status, string staffAccessToken, CancellationToken cancellationToken)
+    // status null = every damage at this branch, whatever its state.
+    public async Task<List<DamageItem>?> GetDamagesAsync(string? status, string staffAccessToken, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"/damages?status={Uri.EscapeDataString(status)}");
+        var path = status is null ? "/damages" : $"/damages?status={Uri.EscapeDataString(status)}";
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", staffAccessToken);
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
@@ -481,10 +514,6 @@ public class BackendApiClient
         var envelope = JsonSerializer.Deserialize<ApiResponse<List<DaysWorkedItem>>>(body, WebJson);
         return envelope?.Data;
     }
-
-    /// <summary>Freezes the branch's days for the period so payroll can read them. Only an Administrator can reopen it.</summary>
-    public Task<SyncResult> LockDaysWorkedAsync(DaysWorkedLockBody body, string staffAccessToken, CancellationToken cancellationToken)
-        => SendStaffAsync(HttpMethod.Post, "/days-worked/lock", staffAccessToken, body, cancellationToken);
 
     // ------------------------------------------------------------------ back office: fingerprint consent (device token)
 
@@ -591,7 +620,8 @@ public record DeviceMapping(
     string? EmployeeName,
     string? EmployeeNumber,
     string? Position,
-    string? BranchName);
+    string? BranchName,
+    string? StaffRole = null);   // BRANCH_MANAGER or BACK_OFFICE when this employee is also that login
 
 public record SyncResult(bool Succeeded, string? Error, int? StatusCode = null, bool FromBackend = false)
 {

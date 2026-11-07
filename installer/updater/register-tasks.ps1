@@ -29,7 +29,7 @@ $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatt
 if (-not $skipUpdater) {
     Register-ScheduledTask -TaskPath $path -TaskName 'Updater' -Force -Action $updaterAction -Trigger @($atStartup, $hourly) -Settings $settings `
         -Principal (New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest) `
-        -Description 'Installs new versions of Dhwarsh HR Attendance, signed with the release key.' | Out-Null
+        -Description 'Installs new versions of Kisiimatt Management System, signed with the release key.' | Out-Null
 }
 
 # BUILTIN\Users: runs on the desktop of whoever is signed in to Windows.
@@ -37,4 +37,4 @@ $openAction = New-ScheduledTaskAction -Execute (Join-Path $AppDir 'HrpayrollDesk
 Register-ScheduledTask -TaskPath $path -TaskName 'Open app' -Force -Action $openAction `
     -Principal (New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited) `
     -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Seconds 0)) `
-    -Description 'Opens Dhwarsh HR Attendance again after an automatic update.' | Out-Null
+    -Description 'Opens Kisiimatt Management System again after an automatic update.' | Out-Null

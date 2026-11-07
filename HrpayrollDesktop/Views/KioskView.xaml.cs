@@ -52,20 +52,8 @@ public partial class KioskView : UserControl
 
         _promptTimer.Tick += (_, _) => ShowIdle();
         _outcomeTimer.Tick += (_, _) => ShowIdle();
-
-        SizeChanged += (_, _) => ArrangeForSize();
-    }
-
-    // Small windows drop the guide cards first (the same text is under "How it works"), then the right column,
-    // so the scanner and its button always fit.
-    private void ArrangeForSize()
-    {
-        var side = ActualWidth >= 1200 ? 280 : ActualWidth >= 900 ? 250 : 0;
-        SidePanel.Visibility = side > 0 ? Visibility.Visible : Visibility.Collapsed;
-        SideColumn.Width = new GridLength(side);
-
-        var mainWidth = ActualWidth - 190 - 24 - side - (side > 0 ? 18 : 0) - 32;
-        StepsRow.Visibility = mainWidth >= 640 && ActualHeight >= 600 ? Visibility.Visible : Visibility.Collapsed;
+        // A fixed desktop layout: the sidebar, the scanner, the guide cards and the right column always show.
+        // The window's minimum size guarantees they fit, so nothing is hidden or moved on resize.
     }
 
     // ----- The scanner -----

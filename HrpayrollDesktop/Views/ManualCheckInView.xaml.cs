@@ -194,7 +194,7 @@ public partial class ManualCheckInView : UserControl
 
         var converter = new BrushConverter();
         var (avatarBg, avatarFg) = AvatarPalette[$"emp-{e.Id}".Sum(c => (int)c) % AvatarPalette.Length];
-        var detail = string.Join("  •  ", new[] { e.EmployeeNumber, e.Position }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        var detail = string.Join("  •  ", new[] { StaffRoles.Label(e.Id), e.EmployeeNumber, e.Position }.Where(s => !string.IsNullOrWhiteSpace(s)));
 
         return new ManualCheckInRow
         {
@@ -207,7 +207,7 @@ public partial class ManualCheckInView : UserControl
             AvatarBg = (Brush)converter.ConvertFromString(avatarBg)!,
             AvatarFg = (Brush)converter.ConvertFromString(avatarFg)!,
             CanCheckIn = canCheckIn,
-            SearchText = $"{e.FullName} {e.EmployeeNumber} {e.Position}",
+            SearchText = $"{e.FullName} {e.EmployeeNumber} {e.Position} {StaffRoles.Label(e.Id)}",
         };
     }
 

@@ -19,8 +19,13 @@
                                TextTrimming="CharacterEllipsis"/>
                     <TextBlock Text="{Binding Sub}" Style="{StaticResource Sub}" FontSize="10" TextTrimming="CharacterEllipsis"/>
                 </StackPanel>
-                <TextBlock Grid.Column="2" Text="{Binding AmountText}" Foreground="#8A5F00" FontSize="12"
-                           FontWeight="Bold" VerticalAlignment="Center"/>
+                <StackPanel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right">
+                    <TextBlock Text="{Binding AmountText}" Foreground="#8A5F00" FontSize="12" FontWeight="Bold"
+                               HorizontalAlignment="Right"/>
+                    <Border Background="{Binding StatusBg}" CornerRadius="8" Padding="7,1" Margin="0,3,0,0" HorizontalAlignment="Right">
+                        <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusFg}" FontSize="10" FontWeight="SemiBold"/>
+                    </Border>
+                </StackPanel>
             </Grid>
         </DataTemplate>
     </UserControl.Resources>
@@ -36,7 +41,7 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock Text="Damages" Style="{StaticResource PageTitle}"/>
-                    <TextBlock Text="Record a damage, then the employee agrees by fingerprint on this reader. If that is not possible, override with a reason."
+                    <TextBlock Text="Every damage at this branch. Record one, the employee agrees by fingerprint (or you override with a reason), and the Admin's payment calculation deducts it."
                                Style="{StaticResource Sub}" TextWrapping="Wrap" Margin="0,3,16,0"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -56,8 +61,14 @@
                            Style="{StaticResource Sub}" Margin="0,2,0,4"/>
 
                 <TextBlock Text="EMPLOYEE" Style="{StaticResource FieldLabel}"/>
-                <ComboBox x:Name="EmployeeCombo" DisplayMemberPath="FullName" Height="38" FontSize="13"
-                          VerticalContentAlignment="Center"/>
+                <!-- Only the employee's name, in the list and once chosen. -->
+                <ComboBox x:Name="EmployeeCombo" Height="38" FontSize="13" VerticalContentAlignment="Center">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding FullName}" TextTrimming="CharacterEllipsis"/>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
 
                 <TextBlock Text="AMOUNT (KES)" Style="{StaticResource FieldLabel}"/>
                 <Border Background="{StaticResource SurfaceLowBrush}" CornerRadius="10" Height="38" Padding="12,0">
@@ -90,8 +101,25 @@
 
             <Border Grid.Column="0" Style="{StaticResource Card}">
                 <StackPanel>
-                    <TextBlock Text="Awaiting consent" Style="{StaticResource SectionTitle}"/>
-                    <TextBlock Text="Damages at this branch that no one has agreed to yet" Style="{StaticResource Sub}" Margin="0,2,0,10"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="All damages" Style="{StaticResource SectionTitle}"/>
+                            <TextBlock Text="Newest first, with where each one stands" Style="{StaticResource Sub}" Margin="0,2,0,0"/>
+                        </StackPanel>
+                        <ComboBox x:Name="StatusFilter" Grid.Column="1" Width="170" Height="36" VerticalAlignment="Center"
+                                  SelectionChanged="StatusFilter_SelectionChanged">
+                            <ComboBoxItem Content="All damages" Tag="" IsSelected="True"/>
+                            <ComboBoxItem Content="Awaiting consent" Tag="PENDING_CONSENT"/>
+                            <ComboBoxItem Content="Approved, to deduct" Tag="APPROVED"/>
+                            <ComboBoxItem Content="Deducted" Tag="DEDUCTED"/>
+                            <ComboBoxItem Content="Cancelled" Tag="CANCELLED"/>
+                        </ComboBox>
+                    </Grid>
+                    <TextBlock x:Name="TotalsText" Style="{StaticResource Sub}" Margin="0,8,0,10" TextWrapping="Wrap"/>
                     <ListBox x:Name="DamageList" MinHeight="260" MaxHeight="420" BorderThickness="0" Background="Transparent"
                              ItemTemplate="{StaticResource DamageRowTemplate}"
                              ItemContainerStyle="{StaticResource ListItem}"
@@ -103,7 +131,7 @@
 
             <Border Grid.Column="1" Style="{StaticResource Card}" Padding="26">
                 <Grid>
-                    <TextBlock x:Name="EmptyDetailText" Text="Select a damage to approve it, override it or cancel it."
+                    <TextBlock x:Name="EmptyDetailText" Text="Select a damage to see where it stands. One awaiting consent can be approved by fingerprint, overridden or cancelled."
                                Style="{StaticResource Sub}" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Top"/>
 
                     <StackPanel x:Name="DetailPanel" Visibility="Collapsed">
@@ -114,7 +142,15 @@
                         <TextBlock x:Name="DetailDescriptionText" FontSize="12" Foreground="{StaticResource InkBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
                         <TextBlock x:Name="DetailDateText" Style="{StaticResource Sub}" Margin="0,6,0,0"/>
 
-                        <!-- Fingerprint status -->
+                        <!-- Where the damage stands, including whether the Admin's payment calculation deducted it -->
+                        <Border x:Name="StateBox" CornerRadius="12" Padding="14,10" Margin="0,14,0,0">
+                            <StackPanel>
+                                <TextBlock x:Name="StateTitleText" FontSize="13" FontWeight="Bold"/>
+                                <TextBlock x:Name="StateDetailText" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Fingerprint status (only for a damage awaiting consent) -->
                         <Border x:Name="StatusBox" Background="#F0F4F8" CornerRadius="12" Padding="14,12" Margin="0,18,0,0">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xE90D;" Style="{StaticResource Icon}" FontSize="20" Foreground="{StaticResource BlueBrush}"

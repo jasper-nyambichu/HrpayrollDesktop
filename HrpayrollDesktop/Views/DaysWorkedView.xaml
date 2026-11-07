@@ -4,12 +4,11 @@
 
     <UserControl.Resources>
         <DataTemplate x:Key="DaysRowTemplate">
-            <Border BorderBrush="#E9EFF5" BorderThickness="0,0,0,1" Padding="0,8">
+            <Border BorderBrush="#E9EFF5" BorderThickness="0,0,0,1" Padding="0,10">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="3*"/>
-                        <ColumnDefinition Width="110"/>
-                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="140"/>
                         <ColumnDefinition Width="4*"/>
                     </Grid.ColumnDefinitions>
 
@@ -19,24 +18,11 @@
                         <TextBlock Text="{Binding Number}" Style="{StaticResource Sub}" FontSize="10"/>
                     </StackPanel>
 
-                    <TextBlock Grid.Column="1" Text="{Binding SystemDays}" FontSize="13" Foreground="{StaticResource MutedBrush}"
+                    <TextBlock Grid.Column="1" Text="{Binding Days}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource InkBrush}"
                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
-                    <Border Grid.Column="2" Width="84" Height="34" CornerRadius="8" HorizontalAlignment="Center"
-                            Background="{Binding DaysBackground}" Padding="8,0">
-                        <TextBox Text="{Binding DaysText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 IsEnabled="{Binding Editable}" Style="{StaticResource InputBox}" TextAlignment="Center"
-                                 MaxLength="3"/>
-                    </Border>
-
-                    <Grid Grid.Column="3" Margin="12,0,0,0" VerticalAlignment="Center">
-                        <Border Visibility="{Binding ReasonVisibility}" Background="{StaticResource SurfaceLowBrush}" CornerRadius="8" Height="34" Padding="10,0">
-                            <TextBox Text="{Binding Reason, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                     Style="{StaticResource InputBox}" MaxLength="500"/>
-                        </Border>
-                        <TextBlock Text="{Binding Note}" Style="{StaticResource Sub}" TextWrapping="Wrap"
-                                   VerticalAlignment="Center"/>
-                    </Grid>
+                    <TextBlock Grid.Column="2" Text="{Binding Note}" Style="{StaticResource Sub}" TextWrapping="Wrap"
+                               Margin="12,0,0,0" VerticalAlignment="Center"/>
                 </Grid>
             </Border>
         </DataTemplate>
@@ -48,7 +34,7 @@
         <Border Style="{StaticResource Card}">
             <StackPanel>
                 <TextBlock Text="Days worked" Style="{StaticResource PageTitle}"/>
-                <TextBlock Text="Review each employee's days for the pay period, correct any with a reason, then lock them. Payroll only uses locked figures."
+                <TextBlock Text="The days each employee clocked in during the pay period, counted from attendance. Nothing needs locking: the Admin's payment calculation uses these figures whenever it is run."
                            Style="{StaticResource Sub}" TextWrapping="Wrap" Margin="0,3,0,0"/>
             </StackPanel>
         </Border>
@@ -74,20 +60,8 @@
         <!-- ================= TABLE ================= -->
         <Border Style="{StaticResource Card}" Padding="24">
             <StackPanel>
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock x:Name="TableTitleText" Text="Employees" Style="{StaticResource SectionTitle}"/>
-                        <TextBlock x:Name="TableSubText" Style="{StaticResource Sub}" Margin="0,2,0,0"/>
-                    </StackPanel>
-                    <Border x:Name="LockedPill" Grid.Column="1" Background="#E5F4E2" CornerRadius="10" Padding="12,5"
-                            Visibility="Collapsed" VerticalAlignment="Center">
-                        <TextBlock Text="Locked" FontSize="11" FontWeight="Bold" Foreground="#2E7D24"/>
-                    </Border>
-                </Grid>
+                <TextBlock x:Name="TableTitleText" Text="Employees" Style="{StaticResource SectionTitle}"/>
+                <TextBlock x:Name="TableSubText" Style="{StaticResource Sub}" Margin="0,2,0,0"/>
 
                 <TextBlock x:Name="EmptyText" Text="Choose the pay period and press Show." Style="{StaticResource Sub}"
                            FontSize="12" Margin="0,16,0,0"/>
@@ -96,30 +70,17 @@
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="3*"/>
-                            <ColumnDefinition Width="110"/>
-                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="140"/>
                             <ColumnDefinition Width="4*"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="EMPLOYEE" Style="{StaticResource TableHead}"/>
-                        <TextBlock Grid.Column="1" Text="FROM ATTENDANCE" Style="{StaticResource TableHead}" HorizontalAlignment="Center"/>
-                        <TextBlock Grid.Column="2" Text="DAYS WORKED" Style="{StaticResource TableHead}" HorizontalAlignment="Center"/>
-                        <TextBlock Grid.Column="3" Text="REASON FOR CHANGE" Style="{StaticResource TableHead}" Margin="12,0,0,0"/>
+                        <TextBlock Grid.Column="1" Text="DAYS WORKED" Style="{StaticResource TableHead}" HorizontalAlignment="Center"/>
+                        <TextBlock Grid.Column="2" Text="NOTE" Style="{StaticResource TableHead}" Margin="12,0,0,0"/>
                     </Grid>
 
                     <ItemsControl x:Name="RowsControl" ItemTemplate="{StaticResource DaysRowTemplate}"/>
 
-                    <Grid Margin="0,18,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel VerticalAlignment="Center">
-                            <TextBlock x:Name="TotalText" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
-                            <TextBlock x:Name="HintText" Style="{StaticResource Sub}" TextWrapping="Wrap" Margin="0,3,16,0"/>
-                        </StackPanel>
-                        <Button x:Name="LockButton" Grid.Column="1" Style="{StaticResource PrimaryBtn}" Content="Lock days for payroll"
-                                Click="LockButton_Click"/>
-                    </Grid>
+                    <TextBlock x:Name="TotalText" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" Margin="0,18,0,0"/>
                 </StackPanel>
             </StackPanel>
         </Border>

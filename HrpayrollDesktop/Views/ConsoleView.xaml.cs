@@ -86,9 +86,6 @@ public partial class ConsoleView : UserControl
     private readonly DispatcherTimer _autoRefresh;
     private DispatcherTimer? _toastTimer;
 
-    private bool _userSidebarExpanded = true;
-    private bool _sidebarExpanded = true;
-    private int _layoutMode;
 
     private bool _enrolling;
     private bool _loadingEmployees;
@@ -162,9 +159,7 @@ public partial class ConsoleView : UserControl
         HeaderSearchBox.Text = string.Empty;
 
         _pageDate = DateTime.Today;
-        _layoutMode = 0;
         ApplyDashboardLayout();
-        ApplySidebar();
 
         SelectPage("Dashboard");
         SetEnrollState(EnrollUiState.Ready);
@@ -258,59 +253,21 @@ public partial class ConsoleView : UserControl
     }
 
     // ===================================================================
-    //  Window chrome, sidebar, responsiveness
+    //  Window chrome and the fixed desktop layout
     // ===================================================================
 
     private void HeaderBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) => HeaderDragRequested?.Invoke(e);
 
-    private void Root_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (!_initialized) return;
-        ApplySidebar();
-        ApplyDashboardLayout();
-    }
-
-    private void SidebarToggle_Click(object sender, RoutedEventArgs e)
-    {
-        _userSidebarExpanded = !_userSidebarExpanded;
-        ApplySidebar();
-        ApplyDashboardLayout();
-    }
-
-    private void ApplySidebar()
-    {
-        // Auto-collapse on narrow windows, otherwise honour the user's choice.
-        var expanded = _userSidebarExpanded && ActualWidth >= 1100;
-        SidebarColumn.Width = new GridLength(expanded ? 190 : 72);
-        LogoTile.Width = LogoTile.Height = expanded ? 84 : 44;
-        LogoTile.CornerRadius = new CornerRadius(expanded ? 20 : 12);
-        LogoTile.Padding = new Thickness(expanded ? 9 : 5);
-        _sidebarExpanded = expanded;
-
-        var v = expanded ? Visibility.Visible : Visibility.Collapsed;
-        NavDashboardLabel.Visibility = v;
-        NavAttendanceLabel.Visibility = v;
-        NavEnrollLabel.Visibility = v;
-        NavDaysWorkedLabel.Visibility = v;
-        NavDamagesLabel.Visibility = v;
-        NavDeviceLabel.Visibility = v;
-        NavHelpLabel.Visibility = v;
-        NavSignOutLabel.Visibility = v;
-    }
-
-    /// <summary>The design's side column on a wide window. On a narrow one it moves underneath.</summary>
+    /// <summary>
+    /// A desktop-only, fixed layout: the sidebar stays open at its full width and the dashboard always has
+    /// its side column. Nothing is rearranged when the window is resized (the window has a minimum size).
+    /// </summary>
     private void ApplyDashboardLayout()
     {
-        if (!_initialized) return;
-
-        var mode = ActualWidth - SidebarColumn.Width.Value >= 1000 ? 2 : 1;
-        if (mode == _layoutMode) return;
-        _layoutMode = mode;
-
-        var twoColumns = mode == 2;
-        DashSideColumn.Width = twoColumns ? new GridLength(290) : new GridLength(0);
-        Grid.SetColumn(DashSide, twoColumns ? 1 : 0);
-        Grid.SetRow(DashSide, twoColumns ? 0 : 1);
+        SidebarColumn.Width = new GridLength(190);
+        DashSideColumn.Width = new GridLength(290);
+        Grid.SetColumn(DashSide, 1);
+        Grid.SetRow(DashSide, 0);
     }
 
     // ===================================================================
@@ -387,7 +344,7 @@ public partial class ConsoleView : UserControl
     {
         if (PopupHost.Current is not { } popups) return;
 
-        var yes = await popups.ConfirmAsync("Exit Dhwarsh HR?",
+        var yes = await popups.ConfirmAsync("Exit Kisiimatt Management System?",
             "Fingerprint attendance will stop on this computer until the app is started again.", "Yes, exit", dangerous: true);
 
         if (yes) ExitRequested?.Invoke();
@@ -657,7 +614,7 @@ public partial class ConsoleView : UserControl
             // Someone who has since moved away still shows by name on the days they worked here.
             var name = emp?.FullName ?? _branchAttendanceNames.GetValueOrDefault(id) ?? ShellWindow.FallbackName(id);
             var number = emp?.EmployeeNumber ?? string.Empty;
-            var sub = string.Join(" • ", new[] { emp?.Position, number }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            var sub = string.Join(" • ", new[] { StaffRoles.LabelForTerminal(id), emp?.Position, number }.Where(s => !string.IsNullOrWhiteSpace(s)));
 
             string key, status; Brush sBg, sFg;
             if (ev.Count > 0)
@@ -1378,7 +1335,7 @@ public partial class ConsoleView : UserControl
                 var (bg, fg) = AvatarColors($"emp-{emp.Id}");
                 return new PickerItem(
                     emp.Id, emp.FullName, Initials(emp.FullName),
-                    string.Join(" • ", new[] { emp.Position, emp.EmployeeNumber }.Where(s => !string.IsNullOrWhiteSpace(s))),
+                    string.Join(" • ", new[] { StaffRoles.Label(emp.Id), emp.Position, emp.EmployeeNumber }.Where(s => !string.IsNullOrWhiteSpace(s))),
                     enrolled ? "Enrolled" : "Pending", enrolled ? InFg : WarnFg, bg, fg, enrolled, emp);
             })
             .ToList();

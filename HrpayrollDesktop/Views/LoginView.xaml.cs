@@ -45,6 +45,81 @@ public partial class LoginView : UserControl
 
     public void SetTerminalLabel(string text) => TerminalPillText.Text = text;
 
+    // ===================================================================
+    //  Fingerprint sign-in
+    // ===================================================================
+
+    /// <summary>
+    /// Shows or hides the fingerprint option. The shell offers it only on an activated PC whose reader is working;
+    /// the first sign-in on a new PC (which activates it) always needs the password.
+    /// </summary>
+    public void SetFingerprintAvailable(bool available)
+    {
+        var v = available ? Visibility.Visible : Visibility.Collapsed;
+        FingerprintBox.Visibility = v;
+        FingerprintOrText.Visibility = v;
+        SetFingerprintStatus("Place your finger on the reader.", error: false);
+    }
+
+    /// <summary>A finger was not matched to anyone while the sign-in screen was open.</summary>
+    public void FingerprintNotRecognized()
+    {
+        if (FingerprintBox.Visibility != Visibility.Visible || _busy) return;
+        SetFingerprintStatus("That fingerprint wasn't recognised. Lift your finger and place it again.", error: true);
+    }
+
+    /// <summary>The reader recognised a finger: ask the server whether it is this branch's Branch Manager or Back Office.</summary>
+    public async void SignInWithFingerprint(string terminalUserId)
+    {
+        if (_busy || _apiClient is null || FingerprintBox.Visibility != Visibility.Visible) return;
+
+        var role = Purpose == LoginPurpose.ManualCheckIn ? "BRANCH_MANAGER" : "BACK_OFFICE";
+        _busy = true;
+        ShowError(null);
+        ShowInfo(null);
+        SetInputsEnabled(false);
+        SetFingerprintStatus("Checking your fingerprint…", error: false);
+
+        try
+        {
+            var result = await _apiClient.StaffFingerprintLoginAsync(terminalUserId, role, CancellationToken.None);
+            if (!result.Succeeded || result.Session is null)
+            {
+                SetFingerprintStatus(result.Error ?? "Sign-in failed.", error: true);
+                return;
+            }
+
+            if (result.Session.Role != role)
+            {
+                SetFingerprintStatus("This fingerprint can't open this screen.", error: true);
+                return;
+            }
+
+            SetFingerprintStatus($"Welcome, {result.Session.DisplayName}.", error: false);
+            ClearPassword(PasswordBox);
+            LoginSucceeded?.Invoke(result.Session);
+        }
+        catch (HttpRequestException)
+        {
+            SetFingerprintStatus("Can't reach the server. Check the internet connection and try again.", error: true);
+        }
+        catch (TaskCanceledException)
+        {
+            SetFingerprintStatus("The server took too long to respond. Please try again.", error: true);
+        }
+        finally
+        {
+            _busy = false;
+            SetInputsEnabled(true);
+        }
+    }
+
+    private void SetFingerprintStatus(string text, bool error)
+    {
+        FingerprintStatusText.Text = text;
+        FingerprintStatusText.Foreground = (Brush)FindResource(error ? "ErrorBrush" : "InkSoftBrush");
+    }
+
     /// <summary>Clears the form for the given purpose; call right before showing the overlay.</summary>
     public void Reset(LoginPurpose purpose = LoginPurpose.BackOffice)
     {
@@ -57,8 +132,8 @@ public partial class LoginView : UserControl
             : "Attendance, fingerprints, days worked and damages for your branch.";
         FormTitleText.Text = manager ? "Branch Manager sign-in" : "Back Office sign-in";
         FormSubText.Text = manager
-            ? "Only a Branch Manager can check employees in manually. Use the login your administrator gave you."
-            : "Use the username and password your administrator gave you.";
+            ? "Only a Branch Manager can check employees in manually. Place your finger on the reader, or use the login your administrator gave you."
+            : "Place your finger on the reader, or use the username and password your administrator gave you.";
 
         UsernameBox.Text = string.Empty;
         ClearPassword(PasswordBox);

@@ -61,6 +61,7 @@ public class AttendanceEngine : BackgroundService
 
     // Back Office consent capture: while armed, the next matched finger answers a damage instead of clocking in/out.
     public event Action<ConsentScan>? ConsentScanned;
+    public event Action<string>? StaffSignInScanned;               // terminalUserId of the finger placed on the sign-in screen
 
     public bool DeviceConnected { get; private set; }
 
@@ -112,6 +113,16 @@ public class AttendanceEngine : BackgroundService
     private readonly object _consentLock = new();
     private long? _consentDamageId;
     private string? _consentTerminalUserId;
+
+    private volatile bool _staffSignInArmed;
+
+    /// <summary>
+    /// While the sign-in screen is open, a recognised finger signs the Branch Manager or Back Office in instead of
+    /// being recorded as attendance. Disarmed when the screen closes.
+    /// </summary>
+    public void BeginStaffSignInCapture() => _staffSignInArmed = true;
+
+    public void CancelStaffSignInCapture() => _staffSignInArmed = false;
 
     /// <summary>True while the reader is waiting for an employee to agree to a damage.</summary>
     public bool IsConsentCaptureActive
@@ -347,6 +358,14 @@ public class AttendanceEngine : BackgroundService
             // A Back Office consent capture is waiting: this scan answers the damage, not attendance.
             if (TryTakeConsentScan(evt)) continue;
 
+            // The sign-in screen is open: this finger is someone signing in, not clocking in.
+            if (_staffSignInArmed)
+            {
+                try { StaffSignInScanned?.Invoke(evt.TerminalUserId); }
+                catch (Exception ex) { _logger.LogWarning(ex, "A sign-in handler threw; ignoring."); }
+                continue;
+            }
+
             // The last person to scan is still choosing on screen. Nothing else is recorded until they finish.
             lock (_choiceLock)
             {
@@ -546,6 +565,9 @@ public class AttendanceEngine : BackgroundService
             var mappings = await _apiClient.GetDeviceMappingsAsync(stoppingToken);
             if (mappings is null) return;
             ServerReachable = true;
+
+            // Who is also the Branch Manager or Back Office, so the lists can say so.
+            StaffRoles.Update(mappings.Select(m => (m.EmployeeId, m.StaffRole)));
 
             var entries = mappings
                 .Where(m => !string.IsNullOrWhiteSpace(m.EmployeeName))

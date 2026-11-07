@@ -70,6 +70,7 @@ public partial class ShellWindow : Window
         // ---- Engine events (raised on background threads) ----
         engine.FingerCaptured += () => Dispatcher.InvokeAsync(OnFingerCaptured);
         engine.FingerNotRecognized += () => Dispatcher.InvokeAsync(OnNotRecognized);
+        engine.StaffSignInScanned += userId => Dispatcher.InvokeAsync(() => Login.SignInWithFingerprint(userId));
         engine.FingerRemoved += () => Dispatcher.InvokeAsync(() => Popups.NotifyFingerRemoved());
         engine.FingerPoorQuality += () => Dispatcher.InvokeAsync(() => Popups.ShowHint("Press a little firmer and keep your finger still."));
         engine.MatchOccurred += (userId, eventType, ts) => Dispatcher.InvokeAsync(() => OnClockedIn(userId, eventType, ts));
@@ -226,7 +227,7 @@ public partial class ShellWindow : Window
         _exitPromptOpen = true;
         try
         {
-            var yes = await Popups.ConfirmAsync("Exit Dhwarsh HR?",
+            var yes = await Popups.ConfirmAsync("Exit Kisiimatt Management System?",
                 "Fingerprint attendance will stop on this computer until the app is started again.",
                 "Yes, exit", dangerous: true);
 
@@ -377,6 +378,13 @@ public partial class ShellWindow : Window
 
     private void OnNotRecognized()
     {
+        // On the sign-in screen the finger was someone signing in: tell them there, not with the kiosk pop-up.
+        if (Login.Visibility == Visibility.Visible)
+        {
+            Login.FingerprintNotRecognized();
+            return;
+        }
+
         KioskOutcome(false, "Fingerprint not recognized", "Lift your finger, then place it again.");
         Popups.ShowMessage(PopupKind.Warning, "Fingerprint not recognized",
             "We couldn't match that fingerprint. If this keeps happening, please see the Back Office.",
@@ -469,7 +477,9 @@ public partial class ShellWindow : Window
             RecentScan Row(AttendanceLogEntry l)
             {
                 var (bg, fg) = AvatarFor(l.TerminalUserId);
-                return new RecentScan(Resolve(l.TerminalUserId).Name, ActivityLine(l), bg, fg);
+                var name = Resolve(l.TerminalUserId).Name;
+                if (StaffRoles.LabelForTerminal(l.TerminalUserId) is { } label) name = $"{name} ({label})";
+                return new RecentScan(name, ActivityLine(l), bg, fg);
             }
 
             var latest = log.GroupBy(l => l.TerminalUserId).Select(g => g.OrderBy(x => x.TimestampUtc).Last()).ToList();
@@ -494,6 +504,7 @@ public partial class ShellWindow : Window
         {
             var (bg, fg) = AvatarFor(l.TerminalUserId);
             var name = Resolve(l.TerminalUserId).Name;
+            if (StaffRoles.LabelForTerminal(l.TerminalUserId) is { } label) name = $"{name} ({label})";
             var line = ActivityLine(l).Split("  •  ");
             var reason = string.IsNullOrWhiteSpace(l.Reason) ? line[0] : $"{line[0]}: {l.Reason}";
             return new PopupListRow(name, PopupHost.Initials(name), reason, line[1], bg, fg);
@@ -630,18 +641,31 @@ public partial class ShellWindow : Window
     private void ShowLogin()
     {
         Login.Reset(LoginPurpose.BackOffice);
+        OfferFingerprintSignIn();
         Login.Visibility = Visibility.Visible;
     }
 
-    // The reader does not have to work for this: it is the fallback for when it doesn't.
+    // The reader does not have to work for this: it is the fallback for when it doesn't. When it does work, the
+    // Branch Manager can simply place a finger and go straight to the list.
     private void ShowManualCheckInLogin()
     {
         Login.Reset(LoginPurpose.ManualCheckIn);
+        OfferFingerprintSignIn();
         Login.Visibility = Visibility.Visible;
+    }
+
+    // Only on an activated PC with a working reader; a new PC is activated by a Back Office password sign-in.
+    private void OfferFingerprintSignIn()
+    {
+        var available = _readerConnected && _apiClient.Identity is not null;
+        Login.SetFingerprintAvailable(available);
+        if (available) _engine.BeginStaffSignInCapture();
+        else _engine.CancelStaffSignInCapture();
     }
 
     private void HideLogin()
     {
+        _engine.CancelStaffSignInCapture();
         Login.Visibility = Visibility.Collapsed;
     }
 

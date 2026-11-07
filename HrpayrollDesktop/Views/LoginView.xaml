@@ -29,7 +29,7 @@
                                     <Image Source="/Assets/dhwarsh-mark.png" RenderOptions.BitmapScalingMode="HighQuality"/>
                                 </Border>
                                 <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-                                    <TextBlock Text="Dhwarsh HR" Foreground="White" FontSize="16" FontWeight="Bold"/>
+                                    <TextBlock Text="Kisiimatt Management System" Foreground="White" FontSize="16" FontWeight="Bold"/>
                                     <TextBlock x:Name="BrandRoleText" Text="Back Office" Foreground="#D2E4FF" FontSize="11"/>
                                 </StackPanel>
                             </StackPanel>
@@ -60,6 +60,28 @@
                             <TextBlock x:Name="FormTitleText" Text="Back Office sign-in" Style="{StaticResource PageTitle}"/>
                             <TextBlock x:Name="FormSubText" Text="Use the username and password your administrator gave you." Style="{StaticResource Sub}" FontSize="12"
                                        TextWrapping="Wrap" Margin="0,4,0,8"/>
+
+                            <!-- Fingerprint sign-in: shown on an activated PC with the reader connected -->
+                            <Border x:Name="FingerprintBox" Background="{StaticResource BlueSoftBrush}" CornerRadius="14" Padding="14,12"
+                                    Margin="0,6,0,4" Visibility="Collapsed">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="44" Height="44" CornerRadius="22" Background="White" VerticalAlignment="Top">
+                                        <TextBlock Text="&#xE90D;" Style="{StaticResource Icon}" FontSize="24" Foreground="{StaticResource BlueBrush}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="Sign in with your fingerprint" FontSize="13" FontWeight="Bold" Foreground="{StaticResource InkBrush}"/>
+                                        <TextBlock x:Name="FingerprintStatusText" Text="Place your finger on the reader." FontSize="11"
+                                                   Foreground="{StaticResource InkSoftBrush}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                            <TextBlock x:Name="FingerprintOrText" Text="or use your username and password" Style="{StaticResource Sub}" FontSize="11"
+                                       HorizontalAlignment="Center" Margin="0,6,0,0" Visibility="Collapsed"/>
 
                             <TextBlock Text="Username" Style="{StaticResource FieldLabel}"/>
                             <Grid>

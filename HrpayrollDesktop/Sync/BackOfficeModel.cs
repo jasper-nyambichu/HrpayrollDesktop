@@ -14,7 +14,9 @@ public record DamageItem(
     string Description,
     DateTime DamageDate,
     string Status,
-    bool Overridden);
+    bool Overridden,
+    long? PayrollRunId = null,
+    DateTime? DeductedAt = null);
 
 // Bodies sent to DamageController / BiometricSyncController.
 public record DamageCreateRequest(long EmployeeId, decimal Amount, string Description);
@@ -35,10 +37,6 @@ public record DaysWorkedItem(
     string? AdjustmentReason,
     bool Locked,
     DateTime? LockedAt);
-
-// Body of POST /days-worked/lock (DaysWorkedLockRequest.java).
-public record DaysWorkedAdjustmentBody(long EmployeeId, int DaysWorked, string Reason);
-public record DaysWorkedLockBody(long BranchId, string PeriodStart, string PeriodEnd, List<DaysWorkedAdjustmentBody> Adjustments);
 
 // Mirrors BiometricDeviceResponse.java (only the fields the console needs).
 public record BranchDevice(long Id, long BranchId, string DeviceSerial, string? Status);

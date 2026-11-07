@@ -2,43 +2,32 @@ using HrpayrollDesktop.Auth;
 using HrpayrollDesktop.Sync;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
-using System.Net.Http;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
 
 namespace HrpayrollDesktop;
 
 /// <summary>
-/// Back Office days worked: for a branch and pay period the officer reviews how many days each employee
-/// reported (counted from attendance), corrects any with a reason, then locks the period so payroll can
-/// use the figures. The server does the counting, the checks and the audit trail; this screen only asks.
-/// Reopening a locked period is an Administrator's decision, so there is deliberately no unlock here.
+/// Back Office days worked: for the branch and a pay period, how many days each employee clocked in,
+/// counted by the server from attendance. Nothing is locked any more: the Admin's agent payment
+/// calculation reads the same count whenever it is run, so this page only shows it.
 /// </summary>
 public partial class DaysWorkedView : UserControl
 {
     private BackendApiClient? _apiClient;
     private AuthResponse? _session;
     private long? _branchId;
-
-    private List<DaysRowVm> _rows = new();
     private bool _loading;
-    private bool _busy;
-    private bool _locked;
-    private string _loadedStart = string.Empty;
-    private string _loadedEnd = string.Empty;
 
     /// <summary>message, kind ("success" | "warning" | "error") — the console shows it as a toast.</summary>
     public event Action<string, string>? Notify;
 
     /// <summary>True while a server call is in progress (blocks the idle auto-lock).</summary>
-    public bool IsBusy => _busy;
+    public bool IsBusy => _loading;
 
     public DaysWorkedView()
     {
@@ -56,7 +45,6 @@ public partial class DaysWorkedView : UserControl
     public void StartSession(AuthResponse session)
     {
         _session = session;
-        _rows = new List<DaysRowVm>();
         ResetPeriod();
         ShowPeriodError(null);
         SetEmpty("Choose the pay period and press Show.");
@@ -65,7 +53,6 @@ public partial class DaysWorkedView : UserControl
     public void EndSession()
     {
         _session = null;
-        _rows = new List<DaysRowVm>();
         RowsControl.ItemsSource = null;
         SetEmpty("Choose the pay period and press Show.");
     }
@@ -91,7 +78,7 @@ public partial class DaysWorkedView : UserControl
     private async Task LoadAsync()
     {
         var session = _session;
-        if (session is null || _apiClient is null || _loading || _busy) return;
+        if (session is null || _apiClient is null || _loading) return;
 
         if (_branchId is not long branchId)
         {
@@ -141,22 +128,19 @@ public partial class DaysWorkedView : UserControl
                 return;
             }
 
-            _loadedStart = start;
-            _loadedEnd = end;
+            var rows = items.Select(item => new DaysRow(
+                item.EmployeeName,
+                item.EmployeeNumber ?? string.Empty,
+                item.DaysWorked,
+                item.Adjusted && !string.IsNullOrWhiteSpace(item.AdjustmentReason) ? $"Adjusted earlier: {item.AdjustmentReason}" : string.Empty))
+                .ToList();
 
-            var maxDays = (int)(to - from).TotalDays + 1;
-            _rows = items.Select(item => new DaysRowVm(item, maxDays, UpdateFooter)).ToList();
-            _locked = _rows.All(r => r.Locked);
-
-            RowsControl.ItemsSource = _rows;
+            RowsControl.ItemsSource = rows;
             TableTitleText.Text = $"{from.ToString("d MMM yyyy", CultureInfo.InvariantCulture)} to {to.ToString("d MMM yyyy", CultureInfo.InvariantCulture)}";
-            TableSubText.Text = $"{_rows.Count} employees";
-            LockedPill.Visibility = _locked ? Visibility.Visible : Visibility.Collapsed;
+            TableSubText.Text = $"{rows.Count} employees";
+            TotalText.Text = $"Total: {rows.Sum(r => r.Days)} days";
             EmptyText.Visibility = Visibility.Collapsed;
             TablePanel.Visibility = Visibility.Visible;
-            LockButton.Visibility = _locked ? Visibility.Collapsed : Visibility.Visible;
-
-            UpdateFooter(lockedAt: items.FirstOrDefault(i => i.Locked)?.LockedAt);
         }
         catch (Exception)
         {
@@ -178,7 +162,6 @@ public partial class DaysWorkedView : UserControl
         EmptyText.Text = message;
         EmptyText.Visibility = Visibility.Visible;
         TablePanel.Visibility = Visibility.Collapsed;
-        LockedPill.Visibility = Visibility.Collapsed;
         TableTitleText.Text = "Employees";
         TableSubText.Text = string.Empty;
     }
@@ -188,185 +171,7 @@ public partial class DaysWorkedView : UserControl
         PeriodErrorText.Text = message ?? string.Empty;
         PeriodErrorText.Visibility = string.IsNullOrEmpty(message) ? Visibility.Collapsed : Visibility.Visible;
     }
-
-    // ===================================================================
-    //  Footer + locking
-    // ===================================================================
-
-    private void UpdateFooter() => UpdateFooter(null);
-
-    private void UpdateFooter(DateTime? lockedAt)
-    {
-        if (_rows.Count == 0) return;
-
-        var total = _rows.Where(r => r.IsValid).Sum(r => r.Value);
-        var changed = _rows.Count(r => r.IsChanged);
-        var invalid = _rows.Any(r => !r.IsValid);
-        var missingReason = _rows.Any(r => r.IsChanged && string.IsNullOrWhiteSpace(r.Reason));
-
-        TotalText.Text = changed > 0
-            ? $"Total: {total} days · {changed} adjusted"
-            : $"Total: {total} days";
-
-        if (_locked)
-        {
-            var when = lockedAt is DateTime at ? $" on {at.ToString("d MMM yyyy, HH:mm", CultureInfo.InvariantCulture)}" : string.Empty;
-            HintText.Text = $"Locked{when}. Payroll can use these figures. Only an Administrator can reopen the period.";
-            return;
-        }
-
-        HintText.Text = invalid
-            ? $"Days must be whole numbers from 0 to {_rows[0].MaxDays}."
-            : missingReason
-                ? "Give a reason for every row you changed before locking."
-                : "Rows you change need a reason. Everyone else is locked as attendance shows.";
-
-        LockButton.IsEnabled = !_busy && !invalid && !missingReason;
-    }
-
-    private async void LockButton_Click(object sender, RoutedEventArgs e)
-    {
-        var session = _session;
-        if (session is null || _apiClient is null || _busy || _locked || _rows.Count == 0) return;
-        if (_branchId is not long branchId) return;
-        if (_rows.Any(r => !r.IsValid) || _rows.Any(r => r.IsChanged && string.IsNullOrWhiteSpace(r.Reason))) return;
-
-        var adjustments = _rows
-            .Where(r => r.IsChanged)
-            .Select(r => new DaysWorkedAdjustmentBody(r.EmployeeId, r.Value, r.Reason.Trim()))
-            .ToList();
-
-        if (PopupHost.Current is not { } popups) return;
-        var yes = await popups.ConfirmAsync("Lock days worked?",
-            $"Lock the days for {_rows.Count} employees ({_loadedStart} to {_loadedEnd})? " +
-            "Payroll will use these figures. Only an Administrator can reopen the period afterwards.",
-            "Yes, lock them");
-        if (!yes) return;
-
-        var done = false;
-        _busy = true;
-        LockButton.IsEnabled = false;
-        ShowButton.IsEnabled = false;
-
-        try
-        {
-            var result = await _apiClient.LockDaysWorkedAsync(
-                new DaysWorkedLockBody(branchId, _loadedStart, _loadedEnd, adjustments), session.AccessToken, CancellationToken.None);
-            if (!ReferenceEquals(session, _session)) return;
-
-            if (result.Succeeded)
-            {
-                done = true;
-                Notify?.Invoke("Days worked locked for payroll.", "success");
-            }
-            else
-            {
-                var message = FriendlyMessages.Translate(result.Error);
-                HintText.Text = message;
-                Notify?.Invoke(message, "error");
-            }
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            Notify?.Invoke("Couldn't reach the server. The days were not locked.", "error");
-        }
-        finally
-        {
-            _busy = false;
-            ShowButton.IsEnabled = true;
-            UpdateFooter();
-        }
-
-        if (done)
-        {
-            // Show the locked result for exactly the period that was locked.
-            FromPicker.SelectedDate = DateTime.ParseExact(_loadedStart, "yyyy-MM-dd", CultureInfo.InvariantCulture);
-            ToPicker.SelectedDate = DateTime.ParseExact(_loadedEnd, "yyyy-MM-dd", CultureInfo.InvariantCulture);
-            await LoadAsync();
-        }
-    }
 }
 
-/// <summary>One employee's row: the days figure and reason are editable until the period is locked.</summary>
-internal sealed class DaysRowVm : INotifyPropertyChanged
-{
-    private static readonly Brush NormalBg = Frozen("#F0F4F8");
-    private static readonly Brush ErrorBg = Frozen("#FFDAD6");
-    private static readonly Brush LockedBg = Frozen("#E7EEEF");
-
-    private readonly DaysWorkedItem _item;
-    private readonly Action _onChanged;
-    private string _daysText;
-    private string _reason = string.Empty;
-
-    public DaysRowVm(DaysWorkedItem item, int maxDays, Action onChanged)
-    {
-        _item = item;
-        MaxDays = maxDays;
-        _onChanged = onChanged;
-        _daysText = item.DaysWorked.ToString(CultureInfo.InvariantCulture);
-    }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-
-    public long EmployeeId => _item.EmployeeId;
-    public string Name => _item.EmployeeName;
-    public string Number => _item.EmployeeNumber ?? string.Empty;
-    public int SystemDays => _item.SystemDays;
-    public bool Locked => _item.Locked;
-    public int MaxDays { get; }
-
-    public bool Editable => !Locked;
-
-    public string DaysText
-    {
-        get => _daysText;
-        set
-        {
-            if (_daysText == value) return;
-            _daysText = value;
-            Raise(nameof(DaysText));
-            Raise(nameof(ReasonVisibility));
-            Raise(nameof(DaysBackground));
-            Raise(nameof(Note));
-            _onChanged();
-        }
-    }
-
-    public string Reason
-    {
-        get => _reason;
-        set
-        {
-            if (_reason == value) return;
-            _reason = value;
-            Raise(nameof(Reason));
-            _onChanged();
-        }
-    }
-
-    public bool IsValid => int.TryParse(_daysText.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var v) && v >= 0 && v <= MaxDays;
-
-    public int Value => int.Parse(_daysText.Trim(), NumberStyles.None, CultureInfo.InvariantCulture);
-
-    // A row only needs a reason when the officer moved it away from what attendance says.
-    public bool IsChanged => Editable && IsValid && Value != SystemDays;
-
-    public Visibility ReasonVisibility => IsChanged ? Visibility.Visible : Visibility.Collapsed;
-
-    public Brush DaysBackground => !Editable ? LockedBg : IsValid ? NormalBg : ErrorBg;
-
-    public string Note =>
-        Locked ? (_item.Adjusted ? $"Adjusted: {_item.AdjustmentReason}" : string.Empty)
-        : !IsValid ? $"Whole number from 0 to {MaxDays}"
-        : string.Empty;
-
-    private void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-
-    private static Brush Frozen(string hex)
-    {
-        var brush = (SolidColorBrush)new BrushConverter().ConvertFromString(hex)!;
-        brush.Freeze();
-        return brush;
-    }
-}
+/// <summary>One employee's row: the days counted from attendance.</summary>
+internal sealed record DaysRow(string Name, string Number, int Days, string Note);

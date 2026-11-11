@@ -1,4 +1,9 @@
-# Builds the branch PC installer: installer\Output\DhwarshHR-Setup-<version>.exe
+# Builds the branch PC installers, all from one build of the app:
+#   installer\Output\Kisiimatt-Setup-<version>.exe      Kisiimatt's server built in
+#   installer\Output\ShahCeramics-Setup-<version>.exe   Shah Ceramics' server built in
+#   installer\Output\DhwarshHR-Setup-<version>.exe      asks for the server; the one published for automatic updates
+# Each PC's server is saved in C:\ProgramData\Dhwarsh HR\server.json, which updates never change.
+# A new organisation: add a line to $organisations below.
 #
 #   powershell -ExecutionPolicy Bypass -File installer\build-installer.ps1
 #
@@ -15,7 +20,7 @@ $redist = Join-Path $here 'redist'
 [xml]$csproj = Get-Content $project
 $version = ($csproj.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1).Version
 if (-not $version) { throw 'No <Version> in HrpayrollDesktop.csproj' }
-Write-Host "Building Kisiimatt Management System $version" -ForegroundColor Cyan
+Write-Host "Building Dhwarsh Employee Management $version" -ForegroundColor Cyan
 
 # 1. The app, with its own .NET runtime, so the branch PC needs nothing else.
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
@@ -65,12 +70,23 @@ $iscc = @(
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $iscc) { throw 'Inno Setup 6 not found. Install it with: winget install JRSoftware.InnoSetup' }
 
+$organisations = @(
+    @{ Name = 'Kisiimatt';     File = 'Kisiimatt';    Server = 'https://employeemanagent.taild2f884.ts.net' },
+    @{ Name = 'Shah Ceramics'; File = 'ShahCeramics'; Server = 'https://employeemanagent.taild2f884.ts.net:8443' }
+)
+
 & $iscc "/DAppVersion=$version" (Join-Path $here 'DhwarshHR.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' }
+$setups = @(Join-Path $here "Output\DhwarshHR-Setup-$version.exe")
 
-$setup = Join-Path $here "Output\DhwarshHR-Setup-$version.exe"
+foreach ($org in $organisations) {
+    & $iscc "/DAppVersion=$version" "/DOrgName=$($org.Name)" "/DOrgFile=$($org.File)" "/DOrgServer=$($org.Server)" (Join-Path $here 'DhwarshHR.iss')
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed for $($org.Name)" }
+    $setups += Join-Path $here "Output\$($org.File)-Setup-$version.exe"
+}
 
 # 5. The signature branch PCs check before installing it as an update: over the version and the file's SHA-256.
+foreach ($setup in $setups) {
 if (Test-Path $privateKey) {
     $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider
     $rsa.PersistKeyInCsp = $false
@@ -85,6 +101,9 @@ if (Test-Path $privateKey) {
 } else {
     Write-Warning "No private key at $privateKey, so this build is not signed and can't be published as an update."
 }
+}
 
 Write-Host ''
-Write-Host "Done: $setup ($([math]::Round((Get-Item $setup).Length / 1MB, 1)) MB)" -ForegroundColor Green
+foreach ($setup in $setups) {
+    Write-Host "Done: $setup ($([math]::Round((Get-Item $setup).Length / 1MB, 1)) MB)" -ForegroundColor Green
+}

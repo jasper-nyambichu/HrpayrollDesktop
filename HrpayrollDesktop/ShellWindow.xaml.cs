@@ -162,32 +162,85 @@ public partial class ShellWindow : Window
         MaxButton.Content = maximized ? "" : "";
         MaxButton.ToolTip = maximized ? "Restore down" : "Maximize";
 
-        RootGrid.Margin = maximized ? MaximizedMargin() : new Thickness(0);
+        // A borderless window's maximized size is set to the monitor's working area in WndProc, so it never
+        // hangs over the screen edges or covers the taskbar and needs no margin.
+        RootGrid.Margin = new Thickness(0);
+        FitToWindow();
     }
 
-    // A maximized window covers the whole monitor and hangs over its edges by the invisible resize border, so
-    // the content is pulled in by that border and by the taskbar, wherever on this monitor the taskbar is.
-    private Thickness MaximizedMargin()
+    private void Window_SizeChanged(object sender, SizeChangedEventArgs e) => FitToWindow();
+
+    // The size every screen of the app is designed for. Below it everything is scaled down by the same
+    // factor, so nothing overlaps, gets cut off or needs scrolling, whatever the screen size or DPI.
+    private const double DesignWidth = 1200;
+    private const double DesignHeight = 680;
+
+    private double _fit = 1;
+
+    private void FitToWindow()
     {
-        var edge = SystemParameters.WindowResizeBorderThickness;
+        if (FitScale is null || ActualWidth <= 0 || ActualHeight <= 0) return;
+        var fit = Math.Min(1, Math.Min(ActualWidth / DesignWidth, ActualHeight / DesignHeight));
+        if (Math.Abs(fit - _fit) < 0.001) return;
+        _fit = fit;
+        FitScale.ScaleX = fit;
+        FitScale.ScaleY = fit;
+    }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
         var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
-        if (handle == IntPtr.Zero) return edge;
+        System.Windows.Interop.HwndSource.FromHwnd(handle)?.AddHook(WndProc);
+        FitRestoredSizeToScreen(handle);
+    }
 
-        var screen = System.Windows.Forms.Screen.FromHandle(handle);
-        var (bounds, work) = (screen.Bounds, screen.WorkingArea);
+    // The restored (not maximized) window starts at 1366 x 768, or less on a smaller screen, centred on it.
+    private void FitRestoredSizeToScreen(IntPtr handle)
+    {
+        var work = System.Windows.Forms.Screen.FromHandle(handle).WorkingArea;
         var dpi = VisualTreeHelper.GetDpi(this);
+        var (workW, workH) = (work.Width / dpi.DpiScaleX, work.Height / dpi.DpiScaleY);
+        Width = Math.Max(MinWidth, Math.Min(1366, workW * 0.9));
+        Height = Math.Max(MinHeight, Math.Min(768, workH * 0.9));
+        Left = work.Left / dpi.DpiScaleX + (workW - Width) / 2;
+        Top = work.Top / dpi.DpiScaleY + (workH - Height) / 2;
+    }
 
-        return new Thickness(
-            edge.Left + (work.Left - bounds.Left) / dpi.DpiScaleX,
-            edge.Top + (work.Top - bounds.Top) / dpi.DpiScaleY,
-            edge.Right + (bounds.Right - work.Right) / dpi.DpiScaleX,
-            edge.Bottom + (bounds.Bottom - work.Bottom) / dpi.DpiScaleY);
+    private const int WM_GETMINMAXINFO = 0x0024;
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct NativePoint { public int X; public int Y; }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct MinMaxInfo
+    {
+        public NativePoint Reserved, MaxSize, MaxPosition, MinTrackSize, MaxTrackSize;
+    }
+
+    // Maximized = exactly the working area of the monitor the window is on (taskbar left visible, on any
+    // side), instead of the whole monitor plus the invisible border that a borderless WPF window gets.
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg != WM_GETMINMAXINFO) return IntPtr.Zero;
+
+        var screen = System.Windows.Forms.Screen.FromHandle(hwnd);
+        var (bounds, work) = (screen.Bounds, screen.WorkingArea);
+        var info = System.Runtime.InteropServices.Marshal.PtrToStructure<MinMaxInfo>(lParam);
+        info.MaxPosition = new NativePoint { X = work.Left - bounds.Left, Y = work.Top - bounds.Top };
+        info.MaxSize = new NativePoint { X = work.Width, Y = work.Height };
+        info.MaxTrackSize = new NativePoint { X = Math.Max(info.MaxTrackSize.X, work.Width), Y = Math.Max(info.MaxTrackSize.Y, work.Height) };
+        var dpi = VisualTreeHelper.GetDpi(this);
+        info.MinTrackSize = new NativePoint { X = (int)(MinWidth * dpi.DpiScaleX), Y = (int)(MinHeight * dpi.DpiScaleY) };
+        System.Runtime.InteropServices.Marshal.StructureToPtr(info, lParam, true);
+        handled = true;
+        return IntPtr.Zero;
     }
 
     // Drag the window by the strip along the top, on every screen.
     private void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.GetPosition(this).Y > TitleStripHeight) return;
+        if (e.GetPosition(this).Y > TitleStripHeight * _fit) return;
 
         var p = e.GetPosition(CaptionBar);
         if (p.X >= 0 && p.X <= CaptionBar.ActualWidth && p.Y >= 0 && p.Y <= CaptionBar.ActualHeight) return;
@@ -227,7 +280,7 @@ public partial class ShellWindow : Window
         _exitPromptOpen = true;
         try
         {
-            var yes = await Popups.ConfirmAsync("Exit Kisiimatt Management System?",
+            var yes = await Popups.ConfirmAsync("Exit Dhwarsh Employee Management?",
                 "Fingerprint attendance will stop on this computer until the app is started again.",
                 "Yes, exit", dangerous: true);
 

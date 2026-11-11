@@ -344,7 +344,7 @@ public partial class ConsoleView : UserControl
     {
         if (PopupHost.Current is not { } popups) return;
 
-        var yes = await popups.ConfirmAsync("Exit Kisiimatt Management System?",
+        var yes = await popups.ConfirmAsync("Exit Dhwarsh Employee Management?",
             "Fingerprint attendance will stop on this computer until the app is started again.", "Yes, exit", dangerous: true);
 
         if (yes) ExitRequested?.Invoke();

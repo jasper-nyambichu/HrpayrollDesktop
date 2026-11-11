@@ -65,6 +65,10 @@ public partial class App : System.Windows.Application
             {
                 config.SetBasePath(AppContext.BaseDirectory);
                 config.AddJsonFile("appsettings.json", optional: false);
+                // Which organisation's server this PC talks to, chosen when the app was installed. It lives in the
+                // data folder because updates replace the app folder (and appsettings.json with it); without this
+                // file the address in appsettings.json is used, as on PCs installed before 1.4.3.
+                config.AddJsonFile(HrpayrollDesktop.Config.AppPaths.Data("server.json"), optional: true, reloadOnChange: false);
             })
             .ConfigureServices((context, services) =>
             {
@@ -140,7 +144,7 @@ public partial class App : System.Windows.Application
         LogCrash("UI thread", e.Exception);
         System.Windows.MessageBox.Show(
             "A display error occurred, but attendance tracking is still running in the background. Please restart the app when convenient.",
-            "Kisiimatt Management System", MessageBoxButton.OK, MessageBoxImage.Warning);
+            "Dhwarsh Employee Management", MessageBoxButton.OK, MessageBoxImage.Warning);
         e.Handled = true;
     }
 

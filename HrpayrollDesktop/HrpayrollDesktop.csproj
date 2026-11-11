@@ -13,9 +13,9 @@
     <ApplicationIcon>Assets\dhwarsh.ico</ApplicationIcon>
 
     <!-- Shown in Windows' installed apps list. Raise Version for every installer you hand out. -->
-    <Version>1.4.0</Version>
-    <Company>Kisiimatt</Company>
-    <Product>Kisiimatt Management System</Product>
+    <Version>1.4.3</Version>
+    <Company>DhwarshHub</Company>
+    <Product>Dhwarsh Employee Management</Product>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 

@@ -104,6 +104,13 @@ public partial class ConsoleView : UserControl
     private List<LogRow> _pageRows = new();
 
     public event Action? LockRequested;
+    /// <summary>The Branch Manager chose Manual check-in in the sidebar.</summary>
+    public event Action<AuthResponse>? ManualCheckInRequested;
+
+    /// <summary>Whoever is signed in to the console, or null.</summary>
+    public AuthResponse? Session => _session;
+
+    private static bool IsBranchManager(AuthResponse? session) => session?.Role == "BRANCH_MANAGER";
     public event Action? ExitRequested;
     public event Action<MouseButtonEventArgs>? HeaderDragRequested;
 
@@ -193,10 +200,13 @@ public partial class ConsoleView : UserControl
     {
         if (_session is null) return;
 
-        var name = string.IsNullOrWhiteSpace(_session.DisplayName) ? "Back Office" : _session.DisplayName;
+        var roleLabel = IsBranchManager(_session) ? "Branch Manager" : "Back Office";
+        var name = string.IsNullOrWhiteSpace(_session.DisplayName) ? roleLabel : _session.DisplayName;
         HeaderNameText.Text = name;
         HeaderAvatarText.Text = Initials(name);
-        HeaderSubText.Text = _branchName ?? "Back Office";
+        HeaderSubText.Text = _branchName is null ? roleLabel : $"{roleLabel} · {_branchName}";
+        // Manual check-in is the Branch Manager's alone: the Back Office never sees it.
+        NavManualCheckIn.Visibility = IsBranchManager(_session) ? Visibility.Visible : Visibility.Collapsed;
         HeroDateText.Text = DateTime.Now.ToString("MMMM d, yyyy  •  dddd", CultureInfo.InvariantCulture);
         HeroGreetingText.Text = $"Welcome back, {PopupHost.FirstName(name)}!";
     }
@@ -276,6 +286,12 @@ public partial class ConsoleView : UserControl
 
     private void Nav_Click(object sender, RoutedEventArgs e)
     {
+        if (sender is ToggleButton { Tag: "ManualCheckIn" } manual)
+        {
+            manual.IsChecked = false;
+            if (IsBranchManager(_session) && _session is { } session) ManualCheckInRequested?.Invoke(session);
+            return;
+        }
         if (sender is ToggleButton { Tag: string page })
             SelectPage(page);
     }

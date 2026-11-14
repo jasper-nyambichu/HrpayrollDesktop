@@ -172,6 +172,14 @@
                                 <TextBlock x:Name="NavDamagesLabel" Text="Damages" Margin="10,0,0,0" VerticalAlignment="Center"/>
                             </StackPanel>
                         </ToggleButton>
+                        <!-- Branch Manager only (the server allows manual check-in to that role alone). -->
+                        <ToggleButton x:Name="NavManualCheckIn" Tag="ManualCheckIn" Visibility="Collapsed" Style="{StaticResource NavBtn}" Click="Nav_Click"
+                                      ToolTip="Check in employees by hand when the reader can't">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE73A;" Style="{StaticResource Icon}"/>
+                                <TextBlock Text="Manual check-in" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ToggleButton>
                         <ToggleButton x:Name="NavDevice" Tag="Device" Style="{StaticResource NavBtn}" Click="Nav_Click">
                             <Grid>
                                 <StackPanel Orientation="Horizontal">

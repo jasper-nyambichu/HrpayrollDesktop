@@ -84,9 +84,14 @@ public partial class ManualCheckInView : UserControl
         _store = store;
     }
 
-    public void StartSession(AuthResponse session)
+    /// <summary>True while it was opened from the Branch Manager's console, which owns the sign-in.</summary>
+    public bool OpenedFromConsole { get; private set; }
+
+    public void StartSession(AuthResponse session, bool fromConsole = false)
     {
         _session = session;
+        OpenedFromConsole = fromConsole;
+        DoneText.Text = fromConsole ? "Back to console" : "Done";
         _apiClient?.BeginStaffSession(session);
         ManagerNameText.Text = string.IsNullOrWhiteSpace(session.DisplayName) ? session.Username : session.DisplayName;
         SearchBox.Text = string.Empty;
@@ -97,7 +102,9 @@ public partial class ManualCheckInView : UserControl
 
     public void EndSession()
     {
-        _apiClient?.EndStaffSession();
+        // Opened from the console: the console's sign-in stays; it ends when the console signs out.
+        if (!OpenedFromConsole) _apiClient?.EndStaffSession();
+        OpenedFromConsole = false;
         _session = null;
         _rows = new List<ManualCheckInRow>();
         EmployeeList.ItemsSource = null;

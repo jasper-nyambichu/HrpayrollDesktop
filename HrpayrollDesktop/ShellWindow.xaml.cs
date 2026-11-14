@@ -48,7 +48,18 @@ public partial class ShellWindow : Window
         // ---- Navigation between the surfaces ----
         Kiosk.ManagerLoginRequested += ShowLogin;
         Kiosk.ManualCheckInRequested += ShowManualCheckInLogin;
-        ManualCheckIn.DoneRequested += LockToKiosk;
+        ManualCheckIn.DoneRequested += () =>
+        {
+            if (ManualCheckIn.OpenedFromConsole) BackToConsole();
+            else LockToKiosk();
+        };
+        ManagerConsole.ManualCheckInRequested += session =>
+        {
+            ManagerConsole.Visibility = Visibility.Collapsed;
+            ManualCheckIn.StartSession(session, fromConsole: true);
+            ManualCheckIn.Visibility = Visibility.Visible;
+            Touch();
+        };
         ManualCheckIn.CheckedIn += RefreshToday;
         Kiosk.ScanRequested += OnScanRequested;
         Kiosk.SeeAllRequested += ShowTodayList;
@@ -79,6 +90,7 @@ public partial class ShellWindow : Window
         engine.ReturnedFromBreak += back => Dispatcher.InvokeAsync(() => OnReturnedFromBreak(back));
         engine.LunchNotOver += (userId, started, ends) => Dispatcher.InvokeAsync(() => OnLunchNotOver(userId, started, ends));
         engine.SyncStateChanged += () => Dispatcher.InvokeAsync(RefreshSync);
+        engine.BranchDayChanged += () => Dispatcher.InvokeAsync(RefreshToday);   // steps made on the branch's other PC
 
         engine.DeviceReady += () => Dispatcher.InvokeAsync(() =>
         {
@@ -573,7 +585,7 @@ public partial class ShellWindow : Window
             "Coming back: scan again. Only a lunch break can be recorded as late.\n\n" +
             "End of the day: scan, then choose \"Check out for the day\".\n\n" +
             "No internet? Keep scanning. Every scan is saved on this computer and sent automatically when the connection is back.\n\n" +
-            "Reader not working? Your Branch Manager can check you in under \"Manual check-in\". Only a Branch Manager can do this.",
+            "Reader not working? Your Branch Manager can sign in under \"Staff login\" and check you in under \"Manual check-in\". Only a Branch Manager can do this.",
             autoCloseSeconds: 0);
 
     // ===== Sync status =====
@@ -727,7 +739,7 @@ public partial class ShellWindow : Window
     {
         var serial = _adapter.DeviceSerial;
         var label = string.IsNullOrWhiteSpace(serial) ? "Biometric terminal" : $"Reader {serial}";
-        Kiosk.SetStationLabel(_apiClient.Identity is null ? "Back Office sign-in needed to activate" : label);
+        Kiosk.SetStationLabel(_apiClient.Identity is null ? "Staff sign-in needed to activate" : label);
     }
 
     private void OnLoginSucceeded(AuthResponse session)
@@ -748,6 +760,16 @@ public partial class ShellWindow : Window
 
         Touch();
         _idleTimer.Start();
+    }
+
+    // From the Branch Manager's manual check-in back to the console, still signed in.
+    private void BackToConsole()
+    {
+        ManualCheckIn.EndSession();
+        ManualCheckIn.Visibility = Visibility.Collapsed;
+        ManagerConsole.Visibility = Visibility.Visible;
+        RefreshToday();
+        Touch();
     }
 
     private void LockToKiosk()

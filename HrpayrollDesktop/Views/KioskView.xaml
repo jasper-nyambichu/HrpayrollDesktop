@@ -86,7 +86,7 @@
 
                 <StackPanel Grid.Row="2">
                     <!-- Branch Manager only: check staff in by hand when the reader fails -->
-                    <Button x:Name="ManualCheckInButton" Style="{StaticResource NavActionBtn}" Click="ManualCheckInButton_Click"
+                    <Button x:Name="ManualCheckInButton" Visibility="Collapsed" Style="{StaticResource NavActionBtn}" Click="ManualCheckInButton_Click"
                             ToolTip="Branch Manager: check employees in by hand when the fingerprint reader fails">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE174;" Style="{StaticResource Icon}"/>
@@ -96,7 +96,7 @@
                     <Button x:Name="ManagerLoginButton" Style="{StaticResource NavActionBtn}" Click="ManagerLoginButton_Click" Margin="0">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xEA77;" Style="{StaticResource Icon}"/>
-                            <TextBlock Text="Back Office login" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Staff login" Margin="10,0,0,0" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
                 </StackPanel>

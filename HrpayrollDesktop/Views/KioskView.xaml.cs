@@ -89,7 +89,7 @@ public partial class KioskView : UserControl
         StopTimers();
         Scanner.SetState(ScannerState.Idle);
         if (_readerConnected) SetScannerText(IdleTitle, IdleSub, "Ready", "#0891B2");
-        else SetScannerText("The fingerprint reader is not connected", "Check the reader's USB cable. Meanwhile your Branch Manager can check you in under \"Manual check-in\".", "No reader", "#D18F00");
+        else SetScannerText("The fingerprint reader is not connected", "Check the reader's USB cable. Meanwhile your Branch Manager can sign in under \"Staff login\" and check you in by hand.", "No reader", "#D18F00");
     }
 
     private void StopTimers()

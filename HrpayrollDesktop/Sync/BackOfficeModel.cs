@@ -51,3 +51,6 @@ public record FingerprintSyncBundle(List<FingerprintSyncItem> Templates, List<lo
 // Body and result of POST /attendance/devices (DeviceRegistrationRequest / DeviceRegistrationResponse).
 public record DeviceRegistrationBody(long BranchId, string DeviceSerial);
 public record DeviceRegistration(long Id, string DeviceSerial, string PlaintextToken);
+
+/// <summary>One step of an employee's day at this PC's branch (GET /attendance/biometric/today).</summary>
+public record DayEvent(long EmployeeId, string? TerminalUserId, string EventId, string EventType, DateTime At, DateTime? ExpectedBackAt, string? Reason);

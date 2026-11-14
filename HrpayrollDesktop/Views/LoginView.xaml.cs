@@ -2,6 +2,7 @@ using HrpayrollDesktop.Auth;
 using HrpayrollDesktop.Sync;
 using HrpayrollDesktop.Terminal;
 using System;
+using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -73,7 +74,7 @@ public partial class LoginView : UserControl
     {
         if (_busy || _apiClient is null || FingerprintBox.Visibility != Visibility.Visible) return;
 
-        var role = Purpose == LoginPurpose.ManualCheckIn ? "BRANCH_MANAGER" : "BACK_OFFICE";
+        var role = Purpose == LoginPurpose.ManualCheckIn ? "BRANCH_MANAGER" : "STAFF";
         _busy = true;
         ShowError(null);
         ShowInfo(null);
@@ -83,13 +84,20 @@ public partial class LoginView : UserControl
         try
         {
             var result = await _apiClient.StaffFingerprintLoginAsync(terminalUserId, role, CancellationToken.None);
+            // A server older than the shared staff sign-in knows only the two named roles: try each.
+            if (role == "STAFF" && !result.Succeeded && (result.Error ?? string.Empty).Contains("Unknown role", StringComparison.OrdinalIgnoreCase))
+            {
+                result = await _apiClient.StaffFingerprintLoginAsync(terminalUserId, "BACK_OFFICE", CancellationToken.None);
+                if (!result.Succeeded)
+                    result = await _apiClient.StaffFingerprintLoginAsync(terminalUserId, "BRANCH_MANAGER", CancellationToken.None);
+            }
             if (!result.Succeeded || result.Session is null)
             {
                 SetFingerprintStatus(result.Error ?? "Sign-in failed.", error: true);
                 return;
             }
 
-            if (result.Session.Role != role)
+            if (role == "STAFF" ? !IsStaffRole(result.Session.Role) : result.Session.Role != role)
             {
                 SetFingerprintStatus("This fingerprint can't open this screen.", error: true);
                 return;
@@ -125,15 +133,15 @@ public partial class LoginView : UserControl
     {
         Purpose = purpose;
         var manager = purpose == LoginPurpose.ManualCheckIn;
-        BrandRoleText.Text = manager ? "Branch Manager" : "Back Office";
+        BrandRoleText.Text = manager ? "Branch Manager" : "Back Office · Branch Manager";
         BrandHeadlineText.Text = manager ? "Reader not working? Check staff in by hand." : "Your branch, one clear view.";
         BrandBodyText.Text = manager
             ? "Tick the employees who are here and they are checked in at the server's time, under your name."
             : "Attendance, fingerprints, days worked and damages for your branch.";
-        FormTitleText.Text = manager ? "Branch Manager sign-in" : "Back Office sign-in";
+        FormTitleText.Text = manager ? "Branch Manager sign-in" : "Staff sign-in";
         FormSubText.Text = manager
             ? "Only a Branch Manager can check employees in manually. Place your finger on the reader, or use the login your administrator gave you."
-            : "Place your finger on the reader, or use the username and password your administrator gave you.";
+            : "For the Back Office and the Branch Manager. Place your finger on the reader, or use the username and password your administrator gave you.";
 
         UsernameBox.Text = string.Empty;
         ClearPassword(PasswordBox);
@@ -188,11 +196,10 @@ public partial class LoginView : UserControl
                 return;
             }
 
-            if (result.Session.Role != "BACK_OFFICE")
+            // The branch PC is for the branch's Back Office and its Branch Manager (who can stand in for it).
+            if (!IsStaffRole(result.Session.Role))
             {
-                ShowError(result.Session.Role == "BRANCH_MANAGER"
-                    ? "Branch Managers use \"Manual check-in\" on the home screen. This sign-in is for the Back Office."
-                    : "This device is for Back Office login only.");
+                ShowError("This computer is for the Back Office and the Branch Manager only.");
                 return;
             }
 
@@ -231,9 +238,11 @@ public partial class LoginView : UserControl
             }
             else if (!string.IsNullOrWhiteSpace(_adapter?.DeviceSerial))
             {
-                // First sign-in on this PC: the reader joins this login's branch. The token is shown only once.
+                // First sign-in on this PC: the PC joins this login's branch. The token is shown only once.
+                // The PC is named by its reader AND its computer name, so a branch can have several PCs (two
+                // Back Office desks, say) and moving a reader between them never takes another PC's key away.
                 var (registration, error) = await _apiClient.RegisterDeviceAsync(
-                    branchId, _adapter.DeviceSerial, result.Session.AccessToken, CancellationToken.None);
+                    branchId, PcSerial(_adapter.DeviceSerial), result.Session.AccessToken, CancellationToken.None);
                 if (registration is null)
                 {
                     ShowError(FriendlyMessages.Translate(error));
@@ -275,7 +284,7 @@ public partial class LoginView : UserControl
             return "This account isn't assigned to a branch yet. Ask your administrator.";
 
         if (_apiClient?.Identity is not { } identity)
-            return "This computer isn't activated yet. A Back Office must sign in here once to link it to its branch.";
+            return "This computer isn't activated yet. A Back Office or Branch Manager must sign in here once to link it to its branch.";
 
         var readers = await _apiClient.GetDevicesByBranchAsync(branchId, session.AccessToken, CancellationToken.None);
         if (readers is null)
@@ -284,6 +293,16 @@ public partial class LoginView : UserControl
         return readers.Exists(r => string.Equals(r.DeviceSerial, identity.Serial, StringComparison.Ordinal))
             ? null
             : "This computer belongs to a different branch. Sign in on your own branch's computer.";
+    }
+
+    private static bool IsStaffRole(string? role) => role is "BACK_OFFICE" or "BRANCH_MANAGER";
+
+    // "<reader serial>@<computer name>", at most 100 characters (the server's limit).
+    internal static string PcSerial(string readerSerial)
+    {
+        var machine = new string(Environment.MachineName.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_').ToArray());
+        var serial = string.IsNullOrWhiteSpace(machine) ? readerSerial.Trim() : $"{readerSerial.Trim()}@{machine}";
+        return serial.Length <= 100 ? serial : serial[..100];
     }
 
     private void BackButton_Click(object sender, RoutedEventArgs e) => Cancelled?.Invoke();

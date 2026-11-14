@@ -101,7 +101,7 @@ public class BackendApiClient
     public async Task<LoginResult> StaffFingerprintLoginAsync(string terminalUserId, string role, CancellationToken cancellationToken)
     {
         if (_deviceIdentity is null)
-            return LoginResult.Failure("This computer isn't activated yet. A Back Office must sign in here once with the password.");
+            return LoginResult.Failure("This computer isn't activated yet. A Back Office or Branch Manager must sign in here once with the password.");
 
         var response = await _httpClient.PostAsJsonAsync("/attendance/biometric/staff-login", new { terminalUserId, role }, WebJson, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -425,6 +425,28 @@ public class BackendApiClient
         }
 
         var envelope = JsonSerializer.Deserialize<ApiResponse<FingerprintSyncBundle>>(body, WebJson);
+        return envelope?.Data;
+    }
+
+    /// <summary>
+    /// Today's steps at this PC's branch, from every PC of the branch and the manual check-ins, so a scan here is
+    /// decided from the same day as on the branch's other PCs. Null when the server can't be asked (or is older
+    /// than this feature), in which case the PC decides from its own scans as before.
+    /// </summary>
+    public async Task<List<DayEvent>?> GetDayEventsAsync(CancellationToken cancellationToken)
+    {
+        if (_deviceIdentity is null) return null;
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/attendance/biometric/today");
+        var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogDebug("Today's branch attendance not available: {StatusCode}", (int)response.StatusCode);
+            return null;
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        var envelope = JsonSerializer.Deserialize<ApiResponse<List<DayEvent>>>(body, WebJson);
         return envelope?.Data;
     }
 

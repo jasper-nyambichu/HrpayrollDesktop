@@ -47,6 +47,15 @@ public class AttendanceEngine : BackgroundService
 
     private DateTime _lastMappingAttemptUtc = DateTime.MinValue;
 
+    // ----- One branch, several PCs -----
+    // Each scan is decided from the branch's whole day: what the server has (from every PC of the branch and the
+    // manual check-ins) merged with this PC's own scans, including any not sent yet. So someone who checked in on
+    // Back Office PC 1 can go for lunch, a temporary check-out or check out on PC 2, and nothing is recorded twice.
+    private static readonly TimeSpan BranchDayFreshFor = TimeSpan.FromMilliseconds(500); // only a refresh this recent is reused
+    private static readonly TimeSpan BranchDayScanWait = TimeSpan.FromMilliseconds(1500); // most a scan waits for the server
+    private DateTime _branchDayFetchedUtc = DateTime.MinValue;
+    private readonly SemaphoreSlim _branchDayGate = new(1, 1);
+
     public event Action<string, string, DateTime>? MatchOccurred;   // terminalUserId, eventType, timestampUtc
     public event Action<string, string, DateTime>? DuplicateScan;   // terminalUserId, lastEventType, lastTimestampUtc
     public event Action<ScanChoiceRequest>? ChoiceRequired;         // someone at work scanned: lunch, temporary check-out or clock out?
@@ -81,6 +90,10 @@ public class AttendanceEngine : BackgroundService
 
     /// <summary>Raised after every sync attempt, so screens showing the sync state can refresh straight away.</summary>
     public event Action? SyncStateChanged;
+
+    /// <summary>Raised when the branch's day changed on the server (a step on another PC, a manual check-in).</summary>
+    public event Action? BranchDayChanged;
+    private string _branchDaySignature = string.Empty;
 
     /// <summary>Scans still on their way to the server, oldest first.</summary>
     public List<QueuedEvent> GetUnsentScans() => _queueStore.GetAllPending();
@@ -329,6 +342,7 @@ public class AttendanceEngine : BackgroundService
                 // Saved scans go first: after time offline, attendance must reach the server before anything
                 // else, such as names and fingerprints, which can take a while to download.
                 await SyncPendingAsync(stoppingToken);
+                await RefreshBranchDayAsync(stoppingToken);
                 await RefreshMappingsIfDueAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -371,6 +385,9 @@ public class AttendanceEngine : BackgroundService
             {
                 if (_pendingChoice is not null) continue;
             }
+
+            // What the branch's other PCs recorded, if it isn't already fresh. Offline, this returns at once.
+            await RefreshBranchDayIfStaleAsync(stoppingToken);
 
             var last = _localStore.GetLastEventToday(evt.TerminalUserId);
 
@@ -500,7 +517,7 @@ public class AttendanceEngine : BackgroundService
 
 #if DEBUG
     /// <summary>Test builds only: goes through exactly what a real finger does, without one.</summary>
-    public void SimulateScan(string terminalUserId)
+    public async void SimulateScan(string terminalUserId)
     {
         FingerCaptured?.Invoke();
         var evt = new TerminalEvent($"sim-{Guid.NewGuid():N}", terminalUserId, DateTime.UtcNow, "FINGERPRINT");
@@ -508,6 +525,7 @@ public class AttendanceEngine : BackgroundService
         {
             if (_pendingChoice is not null) return;
         }
+        await RefreshBranchDayIfStaleAsync(CancellationToken.None);   // exactly as a real finger does
         var last = _localStore.GetLastEventToday(terminalUserId);
         if (last is not null && (evt.Timestamp - last.TimestampUtc) < ScanCooldown)
         {
@@ -517,6 +535,81 @@ public class AttendanceEngine : BackgroundService
         HandleScan(evt, last);
     }
 #endif
+
+    private async Task RefreshBranchDayIfStaleAsync(CancellationToken stoppingToken)
+    {
+        if (DateTime.UtcNow - _branchDayFetchedUtc < BranchDayFreshFor) return;
+        using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        wait.CancelAfter(BranchDayScanWait);
+        try
+        {
+            // Waits for a refresh already under way rather than deciding from what it is replacing.
+            await RefreshBranchDayAsync(wait.Token, waitForRunning: true);
+        }
+        catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+        {
+            // Too slow: decide from what this PC knows; the server still absorbs any repeated step.
+        }
+    }
+
+    /// <summary>
+    /// Brings today's steps from the server (every PC of this branch, and manual check-ins) into the local log.
+    /// Returns false when the server couldn't be asked; the PC then decides from what it already has.
+    /// </summary>
+    public async Task<bool> RefreshBranchDayAsync(CancellationToken cancellationToken, bool waitForRunning = false)
+    {
+        if (_apiClient.Identity is null) return false;
+        // One refresh at a time. A scan waits its turn and then asks again (a refresh already under way may
+        // have asked before the other PC's step arrived); the background loop just skips.
+        if (waitForRunning) await _branchDayGate.WaitAsync(cancellationToken);
+        else if (!await _branchDayGate.WaitAsync(0, cancellationToken)) return false;
+        try
+        {
+            List<DayEvent>? events;
+            try
+            {
+                events = await _apiClient.GetDayEventsAsync(cancellationToken);
+            }
+            catch (Exception ex) when (ex is HttpRequestException)
+            {
+                ServerReachable = false;
+                return false;
+            }
+            if (events is null) return false;
+
+            // The server names people by employee; this PC's log uses the reader's id for them.
+            var idsByEmployee = _localStore.GetAllEmployees()
+                .GroupBy(e => e.EmployeeId)
+                .ToDictionary(g => g.Key, g => g.First().TerminalUserId);
+
+            var entries = events
+                .Select(e => new AttendanceLogEntry(
+                    e.EventId,
+                    e.TerminalUserId ?? (idsByEmployee.TryGetValue(e.EmployeeId, out var id) ? id : $"emp-{e.EmployeeId}"),
+                    e.EventType,
+                    DateTime.SpecifyKind(e.At, DateTimeKind.Utc),
+                    e.ExpectedBackAt is { } back ? DateTime.SpecifyKind(back, DateTimeKind.Utc) : null,
+                    e.Reason))
+                .ToList();
+
+            _localStore.ReplaceServerDay(entries, DateTime.Today.AddDays(-1).ToUniversalTime());
+            _branchDayFetchedUtc = DateTime.UtcNow;
+            ServerReachable = true;
+
+            // Screens showing who is in (the kiosk's side panel) refresh only when something actually changed.
+            var signature = string.Join("|", entries.Select(e => e.EventId));
+            if (signature != _branchDaySignature)
+            {
+                _branchDaySignature = signature;
+                try { BranchDayChanged?.Invoke(); } catch (Exception ex) { _logger.LogDebug("A branch-day handler threw: {Reason}", ex.Message); }
+            }
+            return true;
+        }
+        finally
+        {
+            _branchDayGate.Release();
+        }
+    }
 
     // Returns true when a consent capture was armed and the scan was handed to it.
     private bool TryTakeConsentScan(TerminalEvent evt)
@@ -668,7 +761,7 @@ public class AttendanceEngine : BackgroundService
             catch (InvalidOperationException ex)
             {
                 // This PC's reader hasn't been activated yet.
-                LastSyncError = "This computer isn't activated yet. A Back Office signing in here activates it; scans are kept until then.";
+                LastSyncError = "This computer isn't activated yet. A Back Office or Branch Manager signing in here activates it; scans are kept until then.";
                 _logger.LogDebug("Sync skipped: {Reason}", ex.Message);
                 return false;
             }
@@ -702,7 +795,7 @@ public class AttendanceEngine : BackgroundService
             if (result.ShouldPauseSync)
             {
                 LastSyncError = result.StatusCode is 401 or 403
-                    ? "The server no longer accepts this computer's reader, usually because it was set up on another computer. A Back Office signing in here fixes it; scans are kept until then."
+                    ? "The server no longer accepts this computer's reader, usually because it was set up on another computer. A Back Office or Branch Manager signing in here fixes it; scans are kept until then."
                     : "The server is temporarily unavailable — will retry.";
                 _logger.LogWarning("Sync paused ({Status}): {Error}", result.StatusCode, result.Error);
                 return false;

@@ -73,6 +73,9 @@ public class LocalAttendanceStore
         // Upgrade an older database in place: nothing already logged is lost.
         EnsureLogColumn(connection, "ExpectedBackUtc");
         EnsureLogColumn(connection, "Reason");
+        // 1 = a step this PC learned from the server (made on the branch's other PC, or a manual check-in).
+        // Those rows are replaced on every refresh; this PC's own scans (FromServer NULL) are never touched.
+        EnsureLogColumn(connection, "FromServer");
 
         _logger.LogInformation("Local attendance store initialized at {ConnectionString}", _connectionString);
     }
@@ -214,6 +217,46 @@ public class LocalAttendanceStore
         command.Parameters.AddWithValue("$expectedBack", expectedBackUtc is { } back ? back.ToUniversalTime().ToString("O") : DBNull.Value);
         command.Parameters.AddWithValue("$reason", (object?)reason ?? DBNull.Value);
         command.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Makes today's server-reported steps (from every PC of the branch) part of this PC's log, so the next scan
+    /// is decided from the whole branch's day. Steps this PC made itself are kept as they are (same event id:
+    /// skipped, so nothing counts twice); the server's rows from the previous refresh are replaced, so a
+    /// correction made on the web shows here too. One transaction: a scan never sees half a refresh.
+    /// </summary>
+    public void ReplaceServerDay(IReadOnlyCollection<AttendanceLogEntry> serverEvents, DateTime sinceUtc)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+        using var tx = connection.BeginTransaction();
+
+        using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = tx;
+            delete.CommandText = "DELETE FROM attendance_log WHERE FromServer = '1' AND Timestamp >= $since;";
+            delete.Parameters.AddWithValue("$since", sinceUtc.ToUniversalTime().ToString("O"));
+            delete.ExecuteNonQuery();
+        }
+
+        foreach (var e in serverEvents)
+        {
+            using var insert = connection.CreateCommand();
+            insert.Transaction = tx;
+            insert.CommandText = """
+                INSERT OR IGNORE INTO attendance_log (EventId, TerminalUserId, EventType, Timestamp, ExpectedBackUtc, Reason, FromServer)
+                VALUES ($eventId, $terminalUserId, $eventType, $timestamp, $expectedBack, $reason, '1');
+                """;
+            insert.Parameters.AddWithValue("$eventId", e.EventId);
+            insert.Parameters.AddWithValue("$terminalUserId", e.TerminalUserId);
+            insert.Parameters.AddWithValue("$eventType", e.EventType);
+            insert.Parameters.AddWithValue("$timestamp", e.TimestampUtc.ToUniversalTime().ToString("O"));
+            insert.Parameters.AddWithValue("$expectedBack", e.ExpectedBackUtc is { } back ? back.ToUniversalTime().ToString("O") : DBNull.Value);
+            insert.Parameters.AddWithValue("$reason", (object?)e.Reason ?? DBNull.Value);
+            insert.ExecuteNonQuery();
+        }
+
+        tx.Commit();
     }
 
     public AttendanceLogEntry? GetLastEventToday(string terminalUserId)

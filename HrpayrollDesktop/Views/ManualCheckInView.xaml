@@ -80,7 +80,7 @@
                 <Button Style="{StaticResource GhostBtn}" Click="Done_Click" ToolTip="Sign out and go back to the attendance screen">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="&#xE9BA;" Style="{StaticResource Icon}" FontSize="16"/>
-                        <TextBlock Text="Done" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="DoneText" Text="Done" Margin="6,0,0,0" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
             </StackPanel>

@@ -105,6 +105,24 @@ public partial class App : System.Windows.Application
             apiClient.ConfigureDeviceCredentials(saved.DeviceSerial, saved.DeviceToken);
         }
 
+        // The local data (key, branch names, fingerprints, scans) must belong to the server this PC is set up for.
+        // A PC re-installed for another organisation, or one that kept a test branch's data, starts clean instead
+        // of showing the old branch and refusing the new organisation's sign-in.
+        try
+        {
+            var guard = await HrpayrollDesktop.Config.LocalDataGuard.EnsureBelongsToAsync(
+                apiClient.ServerAddress, token => apiClient.CheckDeviceCredentialsAsync(token));
+            if (guard.Cleared)
+            {
+                apiClient.ClearDeviceCredentials();
+                LogCrash("Local data cleared", new InvalidOperationException(guard.Reason));   // a note in crash.log for support
+            }
+        }
+        catch (Exception ex)
+        {
+            LogCrash("Local data check", ex);
+        }
+
         var engine = _host.Services.GetRequiredService<AttendanceEngine>();
         var terminalAdapter = _host.Services.GetRequiredService<ITerminalAdapter>();
         var localStore = _host.Services.GetRequiredService<LocalAttendanceStore>();

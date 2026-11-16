@@ -29,6 +29,11 @@ public partial class LoginView : UserControl
 
     /// <summary>This PC's reader got a (new) key from the server: scans saved meanwhile can be sent now.</summary>
     public event Action? ReaderKeyRenewed;
+    /// <summary>
+    /// This PC still held another organisation's (or a removed test set-up's) key and data, which the server does
+    /// not know: the shell clears all of it, so the PC can be activated afresh for this sign-in's branch.
+    /// </summary>
+    public event Action? ForeignSetupCleared;
 
     /// <summary>What the last successful sign-in was for.</summary>
     public LoginPurpose Purpose { get; private set; } = LoginPurpose.BackOffice;
@@ -215,13 +220,25 @@ public partial class LoginView : UserControl
                 var readers = await _apiClient.GetDevicesByBranchAsync(branchId, result.Session.AccessToken, CancellationToken.None);
                 if (readers is not null && !readers.Exists(r => string.Equals(r.DeviceSerial, identity.Serial, StringComparison.Ordinal)))
                 {
-                    ShowError("This reader belongs to a different branch. Sign in on your own branch's computer.");
-                    return;
+                    var keyKnown = await _apiClient.CheckDeviceCredentialsAsync(CancellationToken.None);
+                    if (keyKnown != false)
+                    {
+                        // This organisation knows the PC, at another of its branches: moving it is the Admin's decision.
+                        ShowError("This computer is set up for another branch. Ask your administrator to deactivate it under " +
+                                  "Devices (Biometric devices on the web), then sign in here again to set it up for your branch.");
+                        return;
+                    }
+
+                    // The server doesn't know this PC's key at all: it is left over from another organisation's server
+                    // or a removed test set-up. Clear it and set this PC up for this branch, as for a new PC.
+                    ForeignSetupCleared?.Invoke();
                 }
 
                 // The server no longer takes this PC's reader key: the reader was set up on another PC since,
                 // which issues a new key. Signing in here takes it back, so the scans saved here can be sent.
-                if (await _apiClient.CheckDeviceCredentialsAsync(CancellationToken.None) == false)
+                // (Not after a foreign set-up was cleared just above: that PC is set up afresh below instead.)
+                if (_apiClient.Identity is not null
+                    && await _apiClient.CheckDeviceCredentialsAsync(CancellationToken.None) == false)
                 {
                     var (renewed, error) = await _apiClient.RegisterDeviceAsync(
                         branchId, identity.Serial, result.Session.AccessToken, CancellationToken.None);
@@ -236,7 +253,8 @@ public partial class LoginView : UserControl
                     ReaderKeyRenewed?.Invoke();
                 }
             }
-            else if (!string.IsNullOrWhiteSpace(_adapter?.DeviceSerial))
+
+            if (_apiClient.Identity is null && !string.IsNullOrWhiteSpace(_adapter?.DeviceSerial))
             {
                 // First sign-in on this PC: the PC joins this login's branch. The token is shown only once.
                 // The PC is named by its reader AND its computer name, so a branch can have several PCs (two

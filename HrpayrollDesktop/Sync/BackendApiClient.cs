@@ -38,6 +38,18 @@ public class BackendApiClient
 
     public DeviceIdentity? Identity => _deviceIdentity;
 
+    /// <summary>The organisation server this PC talks to.</summary>
+    public string ServerAddress => _httpClient.BaseAddress?.ToString() ?? string.Empty;
+
+    /// <summary>Forgets this PC's key (it belonged to another server or set-up); the PC needs activating again.</summary>
+    public void ClearDeviceCredentials()
+    {
+        _deviceIdentity = null;
+        _httpClient.DefaultRequestHeaders.Remove("X-Device-Serial");
+        _httpClient.DefaultRequestHeaders.Remove("X-Device-Token");
+        _logger.LogInformation("Device credentials cleared");
+    }
+
     public void ConfigureDeviceCredentials(string deviceSerial, string deviceToken)
     {
         if (string.IsNullOrWhiteSpace(deviceSerial))

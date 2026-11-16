@@ -67,6 +67,13 @@ public partial class ShellWindow : Window
         Kiosk.SyncStatusRequested += ShowSyncStatus;
         Login.Cancelled += HideLogin;
         Login.LoginSucceeded += OnLoginSucceeded;
+        Login.ForeignSetupCleared += () =>
+        {
+            _engine.ResetLocalState();
+            RefreshToday();
+            RefreshSync();
+            UpdateStationLabel();
+        };
         // A new reader key: send what was saved meanwhile now, and reload names and fingerprints with it.
         Login.ReaderKeyRenewed += () =>
         {

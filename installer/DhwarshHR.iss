@@ -111,9 +111,15 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM {#AppExe}"; Flags: runhidden
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\updater\register-tasks.ps1"" -Remove"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveUpdateTasks"
 
 [UninstallDelete]
-; Only the app's own leftovers. Attendance data in {#DataDir} is kept on purpose.
+; Uninstalling removes everything this app stored on the PC: its activation key, the organisation's server,
+; branch names, fingerprints and any scans not yet sent. Nothing is left for a later install to pick up, so
+; a PC can never carry one organisation's (or a test branch's) set-up into another's.
 Type: filesandordirs; Name: "{app}\Drivers"
 Type: filesandordirs; Name: "{app}\updates"
+Type: filesandordirs; Name: "{#DataDir}"
+
+[Messages]
+ConfirmUninstall=This removes %1 and everything it stored on this computer: its activation, the organisation it belongs to, branch names, fingerprints and any scans not yet sent to the server.%n%nContinue?
 
 [Code]
 // The SecuGen SDK is built with Visual C++ 2015-2022 and needs its runtime (14.40 or newer is current).
@@ -152,6 +158,8 @@ var
   ServerPage: TInputQueryWizardPage;
   ServerUrl: String;
   ServerChosen: Boolean;
+  // The PC moves to another organisation's server: everything stored for the old one is removed.
+  WipeData: Boolean;
 
 function ServerFile: String;
 begin
@@ -228,6 +236,9 @@ var
   Key, Dir: String;
   Json: AnsiString;
 begin
+  Result := '';
+  // Nothing installed: anything in the data folder is a leftover and is cleared at install time.
+  if not AlreadyInstalled then Exit;
   Result := SavedServer;
   if Result <> '' then Exit;
   Key := 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{B62696C1-198E-4E15-8415-9E78855D6B83}_is1';
@@ -252,6 +263,7 @@ begin
     // Run silently, an organisation installer sets up a new PC or one already on this server, but never
     // moves a PC from another organisation's server without someone confirming it on screen.
     ServerChosen := (CurrentServer = '') or (CompareText(CurrentServer, ServerUrl) = 0);
+    WipeData := False;
     Hint := 'This installer is for {#OrgName}. The PC will send attendance to {#OrgName}''s server. Click Next to check the connection.';
   end
   else
@@ -312,9 +324,13 @@ begin
       'Check the address and the internet connection. Use it anyway?', mbError, MB_YESNO) = IDYES;
 
   if Result and (Old <> '') and (CompareText(Old, Url) <> 0) then
-    Result := MsgBox('This PC was set up for a different server:' + #13#10 + Old + #13#10#13#10 +
-      'After switching, it must be activated again, and scans it has not sent yet will not reach the new server. Switch?',
+  begin
+    Result := MsgBox('This PC was set up for a different organisation''s server:' + #13#10 + Old + #13#10#13#10 +
+      'Switching removes everything stored for it on this PC (activation, branch names, fingerprints and any scans ' +
+      'not yet sent). The PC is then activated again by a Back Office or Branch Manager of the new organisation. Switch?',
       mbConfirmation, MB_YESNO) = IDYES;
+    WipeData := Result;
+  end;
 
   if Result then
   begin
@@ -323,8 +339,20 @@ begin
   end;
 end;
 
+// Empties the data folder (the folder itself is recreated by [Dirs] with its permissions).
+procedure ClearDataFolder;
+begin
+  if DirExists(ExpandConstant('{#DataDir}')) then
+    DelTree(ExpandConstant('{#DataDir}\*'), False, True, True);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  // Before any file is copied. A fresh install never inherits an uninstalled copy's set-up (an older
+  // uninstaller kept it on purpose); a PC moving to another organisation starts empty.
+  if (CurStep = ssInstall) and ((not AlreadyInstalled) or WipeData) then
+    ClearDataFolder;
+
   if (CurStep = ssPostInstall) and ServerChosen then
     if not SaveStringToFile(ServerFile, '{"Agent":{"BackendBaseUrl":"' + ServerUrl + '"}}', False) then
       MsgBox('Could not save the server address to ' + ServerFile + '.', mbError, MB_OK);

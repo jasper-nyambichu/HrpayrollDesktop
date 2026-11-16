@@ -13,7 +13,7 @@
     <ApplicationIcon>Assets\dhwarsh.ico</ApplicationIcon>
 
     <!-- Shown in Windows' installed apps list. Raise Version for every installer you hand out. -->
-    <Version>1.4.4</Version>
+    <Version>1.4.5</Version>
     <Company>DhwarshHub</Company>
     <Product>Dhwarsh Employee Management</Product>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>

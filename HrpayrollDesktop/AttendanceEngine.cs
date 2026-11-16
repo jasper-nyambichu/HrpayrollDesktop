@@ -117,6 +117,25 @@ public class AttendanceEngine : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Removes everything this PC kept for its previous set-up (key, branch names, scan log, waiting scans,
+    /// fingerprints) while the app is running, and starts again empty, as a new PC. Used when the server says the
+    /// saved key isn't one of its own.
+    /// </summary>
+    public void ResetLocalState()
+    {
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();   // release the database files so they can be deleted
+        HrpayrollDesktop.Config.LocalDataGuard.ClearNow(_apiClient.ServerAddress);
+        _apiClient.ClearDeviceCredentials();
+        _queueStore.Initialize();
+        _localStore.Initialize();
+        _branchDayFetchedUtc = DateTime.MinValue;
+        _branchDaySignature = string.Empty;
+        LastSyncError = null;
+        InvalidateMappingCache();
+        _logger.LogWarning("Cleared another set-up's local data; this PC starts again as a new PC.");
+    }
+
     /// <summary>Forces the next sync cycle to immediately re-fetch employee mappings from the server.</summary>
     public void InvalidateMappingCache() => _lastMappingAttemptUtc = DateTime.MinValue;
 

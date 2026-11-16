@@ -175,6 +175,123 @@ public partial class ConsoleView : UserControl
         _engine?.InvalidateMappingCache();
         _ = LoadEmployeesAsync();
         _ = BackUpLocalFingerprintsAsync(session);
+        _ = RefreshMyFingerprintAsync(session, offerIfMissing: true);
+    }
+
+    // ===================================================================
+    //  My sign-in fingerprint (a login's own finger, for a Branch Manager who is not an employee)
+    // ===================================================================
+
+    private bool _registeringMyFinger;
+
+    private string MyFingerId => StaffRoles.LoginFingerId(_session?.UserId ?? 0);
+
+    // A login linked to an employee record already signs in with that employee's finger, so the card is for those
+    // who aren't (the Branch Manager, usually). It is shown on the Device & sync page.
+    private async Task RefreshMyFingerprintAsync(AuthResponse session, bool offerIfMissing)
+    {
+        if (_apiClient is null || _adapter is null) return;
+        var linked = session.EmployeeId is not null;
+        MyFingerprintCard.Visibility = linked ? Visibility.Collapsed : Visibility.Visible;
+        if (linked) return;
+
+        var registered = await _apiClient.HasMyLoginFingerprintAsync(session.AccessToken, CancellationToken.None);
+        if (!ReferenceEquals(session, _session)) return;
+
+        if (registered is null)
+        {
+            MyFingerprintStatusText.Text = "The server doesn't offer this yet, or can't be reached right now.";
+            MyFingerprintButton.IsEnabled = false;
+            return;
+        }
+
+        MyFingerprintButton.IsEnabled = _deviceConnected;
+        MyFingerprintButton.Content = registered.Value ? "Register again" : "Register my fingerprint";
+        MyFingerprintStatusText.Text = registered.Value
+            ? "Registered. Place your finger on the reader at the sign-in screen, or on the attendance screen, to sign in."
+            : "Not registered yet.";
+        MyFingerprintStatusText.Foreground = (System.Windows.Media.Brush)FindResource(registered.Value ? "GreenBrush" : "InkSoftBrush");
+
+        if (offerIfMissing && registered == false && _deviceConnected)
+            ShowToast("Sign in with your fingerprint next time: register it under Device & sync.", "success");
+    }
+
+    private async void MyFingerprintButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_registeringMyFinger || _enrolling || _adapter is null || _apiClient is null || _session is null) return;
+        if (!_deviceConnected)
+        {
+            ShowToast("The fingerprint reader isn't connected.", "warning");
+            return;
+        }
+
+        var session = _session;
+        var fingerId = MyFingerId;
+        _registeringMyFinger = true;
+        MyFingerprintButton.IsEnabled = false;
+        MyFingerprintStatusText.Foreground = (System.Windows.Media.Brush)FindResource("InkSoftBrush");
+        MyFingerprintStatusText.Text = "Place your finger on the reader now, and keep it still…";
+
+        // A finger registered before is kept until the new one is saved.
+        var previous = _adapter.GetTemplate(fingerId);
+        try
+        {
+            if (!await Task.Run(() => _adapter.EnrollAsync(fingerId, CancellationToken.None)))
+            {
+                await RestoreMyFingerAsync(fingerId, previous);
+                MyFingerprintStatusText.Text = "No clear fingerprint was captured. Press firmly, keep still and try again.";
+                return;
+            }
+
+            // One finger is either an employee's (attendance) or a login's (sign-in), never both.
+            if (await _adapter.FindOtherOwnerAsync(fingerId) is { } other)
+            {
+                await RestoreMyFingerAsync(fingerId, previous);
+                MyFingerprintStatusText.Text = StaffRoles.IsLoginFinger(other)
+                    ? "That finger is already registered for another sign-in. Use a different finger."
+                    : "That finger is already enrolled for an employee's attendance. Use a different finger.";
+                return;
+            }
+
+            var template = _adapter.GetTemplate(fingerId) ?? throw new InvalidOperationException("The captured fingerprint is missing.");
+            var result = await _apiClient.SaveMyLoginFingerprintAsync(template, session.AccessToken, CancellationToken.None);
+            if (!result.Succeeded)
+            {
+                await RestoreMyFingerAsync(fingerId, previous);
+                MyFingerprintStatusText.Text = result.StatusCode == 404
+                    ? "The server doesn't offer fingerprint sign-in for managers yet. Ask your administrator to update it."
+                    : FriendlyMessages.Translate(result.Error);
+                return;
+            }
+
+            await _adapter.MarkBackedUpAsync(fingerId);
+            ShowToast("Fingerprint registered. You can now sign in with it.", "success");
+            await RefreshMyFingerprintAsync(session, offerIfMissing: false);
+            RefreshDeviceInfo();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            await RestoreMyFingerAsync(fingerId, previous);
+            MyFingerprintStatusText.Text = "Couldn't reach the server, so nothing was saved. Check the connection and try again.";
+        }
+        finally
+        {
+            _registeringMyFinger = false;
+            MyFingerprintButton.IsEnabled = _deviceConnected;
+        }
+    }
+
+    // A new registration didn't go through: drop the capture, and fetch the finger the server holds (if one was
+    // registered before) back onto this PC.
+    private async Task RestoreMyFingerAsync(string fingerId, byte[]? previous)
+    {
+        if (_adapter is null) return;
+        await _adapter.RemoveEnrollmentAsync(fingerId);
+        if (previous is not null && _engine is not null)
+        {
+            try { await _engine.SyncFingerprintsNowAsync(CancellationToken.None); }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { /* next sync brings it back */ }
+        }
     }
 
     public void EndSession()
@@ -220,6 +337,8 @@ public partial class ConsoleView : UserControl
         _deviceConnected = connected;
         _deviceMessage = message;
         ApplyDeviceState();
+        if (!_registeringMyFinger && MyFingerprintStatusText.Text != "The server doesn't offer this yet, or can't be reached right now.")
+            MyFingerprintButton.IsEnabled = connected;
     }
 
     public void NotifyClockEvent(string employeeName, string eventType, DateTime timestampUtc)
@@ -1421,6 +1540,15 @@ public partial class ConsoleView : UserControl
             {
                 SetEnrollState(EnrollUiState.Failed, "No clear fingerprint was captured. Press firmly, keep still and try again.");
                 ShowToast("No fingerprint captured. Please try again.", "error");
+                return;
+            }
+
+            // A Branch Manager's or Back Office's sign-in finger can't also be an employee's attendance finger.
+            if (await _adapter.FindOtherOwnerAsync(terminalUserId) is { } owner && StaffRoles.IsLoginFinger(owner))
+            {
+                await _adapter.RemoveEnrollmentAsync(terminalUserId);
+                SetEnrollState(EnrollUiState.Failed, "That finger is registered for a staff sign-in. Enroll a different finger.");
+                ShowToast("That finger is registered for a staff sign-in.", "error");
                 return;
             }
 

@@ -260,6 +260,37 @@ public class BackendApiClient
             cancellationToken);
     }
 
+    /// <summary>
+    /// Saves the signed-in Branch Manager's or Back Office's OWN sign-in finger (for someone who is not an employee,
+    /// or prefers it). It only ever signs that login in on this branch's PCs; it is never attendance.
+    /// </summary>
+    public Task<SyncResult> SaveMyLoginFingerprintAsync(byte[] template, string staffAccessToken, CancellationToken cancellationToken)
+    {
+        if (_deviceIdentity is null)
+            return Task.FromResult(SyncResult.Failure("This computer isn't activated yet."));
+
+        return SendStaffAsync(HttpMethod.Post, "/attendance/enrollment/my-fingerprint", staffAccessToken,
+            new LoginFingerprintBody(_deviceIdentity.Serial, Convert.ToBase64String(template), null), cancellationToken);
+    }
+
+    /// <summary>Whether the signed-in login has a sign-in finger registered. Null when that can't be told (offline, older server).</summary>
+    public async Task<bool?> HasMyLoginFingerprintAsync(string staffAccessToken, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/attendance/enrollment/my-fingerprint");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", staffAccessToken);
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode) return null;
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return JsonSerializer.Deserialize<ApiResponse<LoginFingerprintStatus>>(body, WebJson)?.Data?.Registered;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>The readers registered to a branch. Null when the list can't be loaded.</summary>
     public async Task<List<BranchDevice>?> GetDevicesByBranchAsync(long branchId, string staffAccessToken, CancellationToken cancellationToken)
     {

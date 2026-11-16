@@ -5,14 +5,14 @@
              PreviewKeyDown="Root_PreviewKeyDown">
     <UserControl.Resources>
         <!-- The white card every pop-up sits on -->
-        <Style x:Key="PopupCard" TargetType="Border">
+        <Style x:Key="PopupCard" TargetType="local:ShadowBorder">
             <Setter Property="Background" Value="White"/>
             <Setter Property="CornerRadius" Value="18"/>
             <Setter Property="Padding" Value="28,28,28,22"/>
             <Setter Property="Width" Value="420"/>
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="Effect" Value="{StaticResource ShadowLarge}"/>
+            <Setter Property="Elevation" Value="Large"/>
             <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
         </Style>
 
@@ -94,8 +94,8 @@
     <Grid>
         <!-- ===== Back Office dialogs: a scan may need to appear over these without losing what was being done ===== -->
         <Grid x:Name="DialogLayer" Visibility="Collapsed" Background="#73162B40">
-            <Border x:Name="ConfirmCard" Style="{StaticResource PopupCard}" Visibility="Collapsed">
-                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+            <local:ShadowBorder x:Name="ConfirmCard" Style="{StaticResource PopupCard}" Visibility="Collapsed">
+                <local:ShadowBorder.RenderTransform><ScaleTransform/></local:ShadowBorder.RenderTransform>
                 <StackPanel>
                     <Grid Width="84" Height="84" HorizontalAlignment="Center">
                         <Ellipse x:Name="ConfirmHalo" Fill="{StaticResource BlueSoftBrush}"/>
@@ -117,10 +117,10 @@
                         <Button x:Name="ConfirmYesButton" Grid.Column="2" Style="{StaticResource PrimaryBtn}" Padding="0,12" Click="ConfirmYes_Click"/>
                     </Grid>
                 </StackPanel>
-            </Border>
+            </local:ShadowBorder>
 
-            <Border x:Name="ListCard" Style="{StaticResource PopupCard}" Width="460" Visibility="Collapsed">
-                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+            <local:ShadowBorder x:Name="ListCard" Style="{StaticResource PopupCard}" Width="460" Visibility="Collapsed">
+                <local:ShadowBorder.RenderTransform><ScaleTransform/></local:ShadowBorder.RenderTransform>
                 <StackPanel>
                     <TextBlock x:Name="ListTitle" Style="{StaticResource PageTitle}" FontSize="18"/>
                     <TextBlock x:Name="ListSub" Style="{StaticResource Sub}" Margin="0,2,0,14" TextWrapping="Wrap"/>
@@ -132,11 +132,11 @@
                     </ScrollViewer>
                     <Button Style="{StaticResource SoftBtn}" Content="Close" Margin="0,8,0,0" Click="ListClose_Click"/>
                 </StackPanel>
-            </Border>
+            </local:ShadowBorder>
 
             <!-- Sync status: what has reached the server, what is waiting, and what was refused and why -->
-            <Border x:Name="SyncCard" Style="{StaticResource PopupCard}" Width="540" Visibility="Collapsed">
-                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+            <local:ShadowBorder x:Name="SyncCard" Style="{StaticResource PopupCard}" Width="540" Visibility="Collapsed">
+                <local:ShadowBorder.RenderTransform><ScaleTransform/></local:ShadowBorder.RenderTransform>
                 <StackPanel>
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -211,15 +211,15 @@
                         </Button>
                     </Grid>
                 </StackPanel>
-            </Border>
+            </local:ShadowBorder>
         </Grid>
 
         <!-- ===== What happens at the reader ===== -->
         <Grid x:Name="ScanLayer" Visibility="Collapsed" Background="#73162B40">
 
             <!-- Scanning, or waiting for a finger -->
-            <Border x:Name="ScanCard" Style="{StaticResource PopupCard}" Visibility="Collapsed">
-                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+            <local:ShadowBorder x:Name="ScanCard" Style="{StaticResource PopupCard}" Visibility="Collapsed">
+                <local:ShadowBorder.RenderTransform><ScaleTransform/></local:ShadowBorder.RenderTransform>
                 <StackPanel>
                     <Border Width="164" Height="164" CornerRadius="82" Background="{StaticResource ScannerGradient}" BorderBrush="{StaticResource BlueFixedBrush}" BorderThickness="1" HorizontalAlignment="Center">
                         <local:FingerprintScanner x:Name="ScanPrint" Margin="4"/>
@@ -229,11 +229,11 @@
                                TextWrapping="Wrap" Margin="0,6,0,4"/>
                     <Button x:Name="ScanCancelButton" Style="{StaticResource SoftBtn}" Content="Close" Margin="0,16,0,0" Click="ScanCancel_Click"/>
                 </StackPanel>
-            </Border>
+            </local:ShadowBorder>
 
             <!-- A result: same shape as the design's "Request Sent Successfully" -->
-            <Border x:Name="MessageCard" Style="{StaticResource PopupCard}" Visibility="Collapsed">
-                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+            <local:ShadowBorder x:Name="MessageCard" Style="{StaticResource PopupCard}" Visibility="Collapsed">
+                <local:ShadowBorder.RenderTransform><ScaleTransform/></local:ShadowBorder.RenderTransform>
                 <StackPanel>
                     <Grid Width="84" Height="84" HorizontalAlignment="Center">
                         <Ellipse x:Name="MessageHalo"/>
@@ -249,11 +249,11 @@
                     </Border>
                     <Button x:Name="MessageCloseButton" Style="{StaticResource SoftBtn}" Margin="0,20,0,0" Click="MessageClose_Click"/>
                 </StackPanel>
-            </Border>
+            </local:ShadowBorder>
 
             <!-- At work and scanned: lunch, temporary check-out, or end of day -->
-            <Border x:Name="ChoiceCard" Style="{StaticResource PopupCard}" Width="470" Visibility="Collapsed">
-                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+            <local:ShadowBorder x:Name="ChoiceCard" Style="{StaticResource PopupCard}" Width="470" Visibility="Collapsed">
+                <local:ShadowBorder.RenderTransform><ScaleTransform/></local:ShadowBorder.RenderTransform>
                 <StackPanel>
                     <StackPanel Orientation="Horizontal">
                         <Border x:Name="ChoiceAvatar" Width="48" Height="48" CornerRadius="24" Background="{StaticResource BlueFixedBrush}">
@@ -321,11 +321,11 @@
                         <TextBlock x:Name="ChoiceCancelText" Text="Cancel"/>
                     </Button>
                 </StackPanel>
-            </Border>
+            </local:ShadowBorder>
 
             <!-- Temporary check-out details -->
-            <Border x:Name="TemporaryCard" Style="{StaticResource PopupCard}" Width="470" Visibility="Collapsed">
-                <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+            <local:ShadowBorder x:Name="TemporaryCard" Style="{StaticResource PopupCard}" Width="470" Visibility="Collapsed">
+                <local:ShadowBorder.RenderTransform><ScaleTransform/></local:ShadowBorder.RenderTransform>
                 <StackPanel>
                     <StackPanel Orientation="Horizontal">
                         <Image Source="/Assets/3D/door.png" Width="48" Height="48" RenderOptions.BitmapScalingMode="HighQuality"/>
@@ -384,13 +384,13 @@
                         <Button x:Name="TemporaryConfirmButton" Grid.Column="2" Style="{StaticResource PrimaryBtn}" Content="Check out" Click="TemporaryConfirm_Click"/>
                     </Grid>
                 </StackPanel>
-            </Border>
+            </local:ShadowBorder>
         </Grid>
 
         <!-- A small hint while nothing else is open -->
-        <Border x:Name="HintToast" Visibility="Collapsed" Background="{StaticResource NavyBrush}" CornerRadius="10" Padding="16,10"
-                HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,28" Effect="{StaticResource ShadowMid}" IsHitTestVisible="False">
+        <local:ShadowBorder x:Name="HintToast" Visibility="Collapsed" Background="{StaticResource NavyBrush}" CornerRadius="10" Padding="16,10"
+                HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,28" Elevation="Mid" IsHitTestVisible="False">
             <TextBlock x:Name="HintText" Foreground="White" FontSize="12" FontWeight="Medium"/>
-        </Border>
+        </local:ShadowBorder>
     </Grid>
 </UserControl>

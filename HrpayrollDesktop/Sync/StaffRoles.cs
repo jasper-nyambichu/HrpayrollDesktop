@@ -28,6 +28,17 @@ public static class StaffRoles
     public static string? LabelForTerminal(string terminalUserId) =>
         terminalUserId.StartsWith("emp-") && long.TryParse(terminalUserId[4..], out var id) ? Label(id) : null;
 
+    /// <summary>
+    /// The reader id of a LOGIN's own sign-in finger ("staff-{userId}"), as opposed to an employee's ("emp-{id}"):
+    /// it only ever signs that Branch Manager or Back Office in, and is never recorded as attendance.
+    /// </summary>
+    public const string LoginFingerPrefix = "staff-";
+
+    public static bool IsLoginFinger(string? terminalUserId) =>
+        terminalUserId is not null && terminalUserId.StartsWith(LoginFingerPrefix, System.StringComparison.Ordinal);
+
+    public static string LoginFingerId(long userId) => LoginFingerPrefix + userId;
+
     /// <summary>"Jane Wanjiru (Branch Manager)", or the name alone.</summary>
     public static string WithLabel(string name, long employeeId) =>
         Label(employeeId) is { } label ? $"{name} ({label})" : name;

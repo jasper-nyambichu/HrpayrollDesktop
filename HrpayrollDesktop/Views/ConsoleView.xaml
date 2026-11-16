@@ -136,10 +136,10 @@
                     </Grid.RowDefinitions>
 
                     <!-- The sidebar is fixed: always open, never hidden. -->
-                    <Border x:Name="LogoTile" Width="84" Height="84" CornerRadius="20" Background="White" Padding="9"
-                            HorizontalAlignment="Center" Margin="0,4,0,24" Effect="{StaticResource ShadowMid}">
+                    <local:ShadowBorder x:Name="LogoTile" Width="84" Height="84" CornerRadius="20" Background="White" Padding="9"
+                            HorizontalAlignment="Center" Margin="0,4,0,24" Elevation="Mid">
                         <Image Source="/Assets/dhwarsh-mark.png" RenderOptions.BitmapScalingMode="HighQuality"/>
-                    </Border>
+                    </local:ShadowBorder>
 
                     <StackPanel Grid.Row="1">
                         <ToggleButton x:Name="NavDashboard" Tag="Dashboard" IsChecked="True" Style="{StaticResource NavBtn}" Click="Nav_Click">
@@ -217,14 +217,14 @@
 
                 <!-- Header: search on the left, the signed-in person on the right, as in the design -->
                 <Grid x:Name="HeaderBar" Margin="8,4,8,12" Background="Transparent" MouseLeftButtonDown="HeaderBar_MouseLeftButtonDown">
-                    <Border HorizontalAlignment="Left" Width="300" Height="44" CornerRadius="22" Background="White" Padding="16,0" Effect="{StaticResource ShadowSoft}">
+                    <local:ShadowBorder HorizontalAlignment="Left" Width="300" Height="44" CornerRadius="22" Background="White" Padding="16,0" Elevation="Soft">
                         <Grid>
                             <TextBlock Text="&#xE8B6;" Style="{StaticResource Icon}" FontSize="19" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Left"/>
                             <TextBox x:Name="HeaderSearchBox" Style="{StaticResource InputBox}" Margin="28,0,0,0" TextChanged="HeaderSearchBox_TextChanged"/>
                             <TextBlock x:Name="HeaderSearchPlaceholder" Text="Search employee" Margin="28,0,0,0" Foreground="{StaticResource MutedBrush}"
                                        FontSize="12" VerticalAlignment="Center" IsHitTestVisible="False"/>
                         </Grid>
-                    </Border>
+                    </local:ShadowBorder>
 
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                         <Grid Margin="0,0,8,0">
@@ -300,31 +300,31 @@
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
-                                        <Border Style="{StaticResource StatCard}">
+                                        <local:ShadowBorder Style="{StaticResource StatCard}">
                                             <StackPanel HorizontalAlignment="Center">
                                                 <Image Source="/Assets/3D/people.png" Width="48" Height="48" RenderOptions.BitmapScalingMode="HighQuality"/>
                                                 <TextBlock x:Name="HeroPresentText" Text="0" FontSize="22" LineHeight="28" FontWeight="Bold" Foreground="{StaticResource InkBrush}" HorizontalAlignment="Center" Margin="0,4,0,0"/>
                                                 <TextBlock Text="At work" Style="{StaticResource Sub}" HorizontalAlignment="Center"/>
                                             </StackPanel>
-                                        </Border>
-                                        <Border Grid.Column="1" Style="{StaticResource StatCard}" BorderBrush="{StaticResource BlueBrush}" BorderThickness="2">
+                                        </local:ShadowBorder>
+                                        <local:ShadowBorder Grid.Column="1" Style="{StaticResource StatCard}" BorderBrush="{StaticResource BlueBrush}" BorderThickness="2">
                                             <StackPanel HorizontalAlignment="Center">
                                                 <Image Source="/Assets/3D/hourglass.png" Width="48" Height="48" RenderOptions.BitmapScalingMode="HighQuality"/>
                                                 <TextBlock x:Name="HeroNotInRun" Text="0" FontSize="22" LineHeight="28" FontWeight="Bold" Foreground="{StaticResource InkBrush}" HorizontalAlignment="Center" Margin="0,4,0,0"/>
                                                 <TextBlock Text="Not yet in" Style="{StaticResource Sub}" HorizontalAlignment="Center"/>
                                             </StackPanel>
-                                        </Border>
-                                        <Border Grid.Column="2" Style="{StaticResource StatCard}">
+                                        </local:ShadowBorder>
+                                        <local:ShadowBorder Grid.Column="2" Style="{StaticResource StatCard}">
                                             <StackPanel HorizontalAlignment="Center">
                                                 <Image Source="/Assets/3D/door.png" Width="48" Height="48" RenderOptions.BitmapScalingMode="HighQuality"/>
                                                 <TextBlock x:Name="HeroOutRun" Text="0" FontSize="22" LineHeight="28" FontWeight="Bold" Foreground="{StaticResource InkBrush}" HorizontalAlignment="Center" Margin="0,4,0,0"/>
                                                 <TextBlock Text="Clocked out" Style="{StaticResource Sub}" HorizontalAlignment="Center"/>
                                             </StackPanel>
-                                        </Border>
+                                        </local:ShadowBorder>
                                     </Grid>
 
                                     <!-- Time log (today) -->
-                                    <Border x:Name="TableCard" Style="{StaticResource Card}">
+                                    <local:ShadowBorder x:Name="TableCard" Style="{StaticResource Card}">
                                         <StackPanel>
                                             <Grid>
                                                 <StackPanel>
@@ -347,10 +347,10 @@
                                                        Style="{StaticResource Sub}" FontSize="12" Margin="0,10,0,0" Visibility="Collapsed"/>
                                             <TextBlock x:Name="DashboardFooterText" Style="{StaticResource Sub}" Margin="2,10,0,0"/>
                                         </StackPanel>
-                                    </Border>
+                                    </local:ShadowBorder>
 
                                     <!-- Analytics chart -->
-                                    <Border x:Name="ChartCard" Style="{StaticResource Card}">
+                                    <local:ShadowBorder x:Name="ChartCard" Style="{StaticResource Card}">
                                         <StackPanel>
                                             <Grid>
                                                 <StackPanel>
@@ -381,7 +381,7 @@
                                             </StackPanel>
                                             <Canvas x:Name="ChartCanvas" Height="230" ClipToBounds="True" SizeChanged="ChartCanvas_SizeChanged"/>
                                         </StackPanel>
-                                    </Border>
+                                    </local:ShadowBorder>
                                 </StackPanel>
 
                                 <!-- Right column -->
@@ -392,7 +392,7 @@
                                     </Grid>
 
                                     <TextBlock Text="Today's status" Style="{StaticResource SectionTitle}" Margin="8,4,8,0"/>
-                                    <Border x:Name="PieCard" Style="{StaticResource Card}" Padding="16">
+                                    <local:ShadowBorder x:Name="PieCard" Style="{StaticResource Card}" Padding="16">
                                         <StackPanel>
                                             <TextBlock x:Name="PieSubText" Style="{StaticResource Sub}" Margin="0,0,0,10"/>
                                             <Grid>
@@ -426,10 +426,10 @@
                                                 </StackPanel>
                                             </Grid>
                                         </StackPanel>
-                                    </Border>
+                                    </local:ShadowBorder>
 
                                     <TextBlock Text="Key rates" Style="{StaticResource SectionTitle}" Margin="8,8,8,0"/>
-                                    <Border x:Name="RingsCard" Style="{StaticResource Card}" Padding="10,16">
+                                    <local:ShadowBorder x:Name="RingsCard" Style="{StaticResource Card}" Padding="10,16">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*"/>
@@ -437,7 +437,7 @@
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
                                             <StackPanel HorizontalAlignment="Center">
-                                                <Grid Width="84" Height="84" RenderTransformOrigin="0.5,0.5">
+                                                <Grid Width="84" Height="84" RenderTransformOrigin="0.5,0.5" TextOptions.TextFormattingMode="Ideal">
                                                     <Grid.LayoutTransform><ScaleTransform ScaleX="0.8" ScaleY="0.8"/></Grid.LayoutTransform>
                                                     <Ellipse Width="76" Height="76" Stroke="#E4EDF4" StrokeThickness="9"/>
                                                     <Path x:Name="RingA" Stroke="#005592" StrokeThickness="9" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="84" Height="84" Stretch="None"/>
@@ -446,7 +446,7 @@
                                                 <TextBlock Text="Attendance" FontSize="10" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center" Margin="0,6,0,0"/>
                                             </StackPanel>
                                             <StackPanel Grid.Column="1" HorizontalAlignment="Center">
-                                                <Grid Width="84" Height="84">
+                                                <Grid Width="84" Height="84" TextOptions.TextFormattingMode="Ideal">
                                                     <Grid.LayoutTransform><ScaleTransform ScaleX="0.8" ScaleY="0.8"/></Grid.LayoutTransform>
                                                     <Ellipse Width="76" Height="76" Stroke="#E4EDF4" StrokeThickness="9"/>
                                                     <Path x:Name="RingB" Stroke="#F2A900" StrokeThickness="9" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="84" Height="84" Stretch="None"/>
@@ -455,7 +455,7 @@
                                                 <TextBlock Text="Enrolled" FontSize="10" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center" Margin="0,6,0,0"/>
                                             </StackPanel>
                                             <StackPanel Grid.Column="2" HorizontalAlignment="Center">
-                                                <Grid Width="84" Height="84">
+                                                <Grid Width="84" Height="84" TextOptions.TextFormattingMode="Ideal">
                                                     <Grid.LayoutTransform><ScaleTransform ScaleX="0.8" ScaleY="0.8"/></Grid.LayoutTransform>
                                                     <Ellipse Width="76" Height="76" Stroke="#E4EDF4" StrokeThickness="9"/>
                                                     <Path x:Name="RingC" Stroke="#5BA7E6" StrokeThickness="9" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="84" Height="84" Stretch="None"/>
@@ -464,23 +464,23 @@
                                                 <TextBlock Text="Checked out" FontSize="10" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center" Margin="0,6,0,0"/>
                                             </StackPanel>
                                         </Grid>
-                                    </Border>
+                                    </local:ShadowBorder>
 
                                     <TextBlock Text="Latest activity" Style="{StaticResource SectionTitle}" Margin="8,8,8,0"/>
-                                    <Border x:Name="LiveSection" Style="{StaticResource Card}" Padding="16,16,16,6">
+                                    <local:ShadowBorder x:Name="LiveSection" Style="{StaticResource Card}" Padding="16,16,16,6">
                                         <StackPanel>
                                             <ItemsControl x:Name="LiveList" ItemTemplate="{StaticResource LiveCardTemplate}"/>
                                             <TextBlock x:Name="LiveEmptyText" Text="Employees who clock in will appear here." Style="{StaticResource Sub}" FontSize="12"
                                                        Margin="0,0,0,10" TextWrapping="Wrap" Visibility="Collapsed"/>
                                         </StackPanel>
-                                    </Border>
+                                    </local:ShadowBorder>
                                 </StackPanel>
                             </Grid>
                         </Grid>
 
                         <!-- ============ TIME LOG (full page) ============ -->
                         <StackPanel x:Name="AttendancePage" Visibility="Collapsed">
-                            <Border Style="{StaticResource Card}">
+                            <local:ShadowBorder Style="{StaticResource Card}">
                                 <StackPanel>
                                     <Grid>
                                         <Grid.ColumnDefinitions>
@@ -525,7 +525,7 @@
                                     <ItemsControl x:Name="PageLogList" ItemTemplate="{StaticResource LogRowTemplate}"/>
                                     <TextBlock x:Name="PageEmptyText" Text="Nothing to show for this filter." Style="{StaticResource Sub}" FontSize="12" Margin="0,10,0,0" Visibility="Collapsed"/>
                                 </StackPanel>
-                            </Border>
+                            </local:ShadowBorder>
                         </StackPanel>
 
                         <!-- ============ ENROLL ============ -->
@@ -535,7 +535,7 @@
                                 <ColumnDefinition Width="7*" MinWidth="360"/>
                             </Grid.ColumnDefinitions>
 
-                            <Border Style="{StaticResource Card}">
+                            <local:ShadowBorder Style="{StaticResource Card}">
                                 <StackPanel>
                                     <TextBlock Text="Select employee" Style="{StaticResource SectionTitle}"/>
                                     <TextBlock Text="Search your branch's employees, then pick who to enroll" Style="{StaticResource Sub}" Margin="0,2,0,12" TextWrapping="Wrap"/>
@@ -552,9 +552,9 @@
                                              ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionChanged="EmployeeListBox_SelectionChanged"/>
                                     <TextBlock x:Name="EmployeeCountText" Style="{StaticResource Sub}" Margin="2,8,0,0"/>
                                 </StackPanel>
-                            </Border>
+                            </local:ShadowBorder>
 
-                            <Border Grid.Column="1" Style="{StaticResource Card}" Padding="26">
+                            <local:ShadowBorder Grid.Column="1" Style="{StaticResource Card}" Padding="26">
                                 <StackPanel>
                                     <Grid>
                                         <TextBlock Text="FINGERPRINT CAPTURE" Style="{StaticResource TableHead}" VerticalAlignment="Center"/>
@@ -630,12 +630,12 @@
                                         </Grid>
                                     </Border>
                                 </StackPanel>
-                            </Border>
+                            </local:ShadowBorder>
                         </Grid>
 
                         <!-- ============ DEVICE ============ -->
                         <StackPanel x:Name="DevicePage" Visibility="Collapsed" MaxWidth="760" HorizontalAlignment="Left">
-                            <Border Style="{StaticResource Card}">
+                            <local:ShadowBorder Style="{StaticResource Card}">
                                 <StackPanel>
                                     <TextBlock Text="Device &amp; sync" Style="{StaticResource PageTitle}"/>
                                     <TextBlock Text="Fingerprint reader health and data waiting to reach the server" Style="{StaticResource Sub}" Margin="0,3,0,12"/>
@@ -664,7 +664,29 @@
                                     </Grid>
                                     <Button Content="Refresh" Style="{StaticResource GhostBtn}" HorizontalAlignment="Left" Margin="0,12,0,0" Click="RefreshDevice_Click"/>
                                 </StackPanel>
-                            </Border>
+                            </local:ShadowBorder>
+
+                            <!-- The signed-in Branch Manager / Back Office's own sign-in finger (they need not be an employee) -->
+                            <local:ShadowBorder x:Name="MyFingerprintCard" Style="{StaticResource Card}" Visibility="Collapsed">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="44" Height="44" CornerRadius="22" Background="{StaticResource BlueSoftBrush}" VerticalAlignment="Top">
+                                        <TextBlock Text="&#xE90D;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource BlueBrush}" HorizontalAlignment="Center"/>
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Margin="14,0,14,0">
+                                        <TextBlock Text="My sign-in fingerprint" Style="{StaticResource SectionTitle}"/>
+                                        <TextBlock x:Name="MyFingerprintText" Style="{StaticResource Sub}" TextWrapping="Wrap" Margin="0,3,0,0"
+                                                   Text="Sign in on this branch's computers by placing your finger on the reader, instead of typing your password. It is never recorded as attendance."/>
+                                        <TextBlock x:Name="MyFingerprintStatusText" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                    <Button x:Name="MyFingerprintButton" Grid.Column="2" Style="{StaticResource PrimaryBtn}" Content="Register my fingerprint"
+                                            VerticalAlignment="Center" Click="MyFingerprintButton_Click"/>
+                                </Grid>
+                            </local:ShadowBorder>
                         </StackPanel>
 
                         <!-- ============ DAYS WORKED, DAMAGES ============ -->
@@ -673,7 +695,7 @@
 
                         <!-- ============ HELP ============ -->
                         <StackPanel x:Name="HelpPage" Visibility="Collapsed" MaxWidth="760" HorizontalAlignment="Left">
-                            <Border Style="{StaticResource Card}">
+                            <local:ShadowBorder Style="{StaticResource Card}">
                                 <StackPanel>
                                     <TextBlock Text="Help" Style="{StaticResource PageTitle}" Margin="0,0,0,10"/>
                                     <TextBlock TextWrapping="Wrap" Foreground="{StaticResource InkBrush}" FontSize="12" LineHeight="20">
@@ -691,7 +713,7 @@
                                         <Run Text="Scans are saved on this computer and sync automatically when the connection returns. Signing in and enrolling need a connection."/>
                                     </TextBlock>
                                 </StackPanel>
-                            </Border>
+                            </local:ShadowBorder>
                         </StackPanel>
 
                     </Grid>
@@ -702,18 +724,18 @@
         <!-- Notifications (bell) -->
         <Popup x:Name="NotifyPopup" PlacementTarget="{Binding ElementName=BellButton}" Placement="Bottom"
                HorizontalOffset="-250" VerticalOffset="8" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-            <Border Width="294" Background="White" CornerRadius="14" Padding="16" Margin="12" Effect="{StaticResource ShadowMid}">
+            <local:ShadowBorder Width="294" Background="White" CornerRadius="14" Padding="16" Margin="12" Elevation="Mid">
                 <StackPanel TextElement.FontFamily="{StaticResource AppFont}">
                     <TextBlock Text="Notifications" Style="{StaticResource SectionTitle}" Margin="0,0,0,10"/>
                     <StackPanel x:Name="NotifyList"/>
                 </StackPanel>
-            </Border>
+            </local:ShadowBorder>
         </Popup>
 
         <!-- Toast -->
-        <Border x:Name="ToastBorder" Visibility="Collapsed" CornerRadius="10" Padding="16,11" HorizontalAlignment="Center" VerticalAlignment="Bottom"
-                Margin="0,0,0,24" MaxWidth="460" Effect="{StaticResource ShadowMid}">
+        <local:ShadowBorder x:Name="ToastBorder" Visibility="Collapsed" CornerRadius="10" Padding="16,11" HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                Margin="0,0,0,24" MaxWidth="460" Elevation="Mid">
             <TextBlock x:Name="ToastText" Foreground="White" FontSize="12" FontWeight="Medium" TextWrapping="Wrap" TextAlignment="Center"/>
-        </Border>
+        </local:ShadowBorder>
     </Grid>
 </UserControl>

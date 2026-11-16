@@ -1,6 +1,7 @@
 <UserControl x:Class="HrpayrollDesktop.ManualCheckInView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:HrpayrollDesktop">
     <UserControl.Resources>
         <!-- One employee: the whole row is the tick box -->
         <Style x:Key="PickRow" TargetType="ToggleButton">
@@ -145,7 +146,7 @@
         </Grid>
 
         <!-- Footer -->
-        <Border Grid.Row="3" Margin="0,14,0,0" Padding="16,12" CornerRadius="14" Background="White" Effect="{StaticResource ShadowSoft}">
+        <local:ShadowBorder Grid.Row="3" Margin="0,14,0,0" Padding="16,12" CornerRadius="14" Background="White" Elevation="Soft">
             <Grid>
                 <StackPanel VerticalAlignment="Center" Margin="0,0,220,0">
                     <TextBlock x:Name="CountText" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
@@ -159,6 +160,6 @@
                     </StackPanel>
                 </Button>
             </Grid>
-        </Border>
+        </local:ShadowBorder>
     </Grid>
 </UserControl>

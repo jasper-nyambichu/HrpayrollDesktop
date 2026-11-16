@@ -71,6 +71,7 @@ public class AttendanceEngine : BackgroundService
     // Back Office consent capture: while armed, the next matched finger answers a damage instead of clocking in/out.
     public event Action<ConsentScan>? ConsentScanned;
     public event Action<string>? StaffSignInScanned;               // terminalUserId of the finger placed on the sign-in screen
+    public event Action<string>? LoginFingerAtKiosk;               // a login's own sign-in finger ("staff-…") placed outside the sign-in screen
 
     public bool DeviceConnected { get; private set; }
 
@@ -399,6 +400,15 @@ public class AttendanceEngine : BackgroundService
                 continue;
             }
 
+            // A Branch Manager's or Back Office's own sign-in finger (not an employee's): it is never attendance.
+            // Placed on the reader at the attendance screen, it opens their sign-in.
+            if (StaffRoles.IsLoginFinger(evt.TerminalUserId))
+            {
+                try { LoginFingerAtKiosk?.Invoke(evt.TerminalUserId); }
+                catch (Exception ex) { _logger.LogWarning(ex, "A sign-in handler threw; ignoring."); }
+                continue;
+            }
+
             // The last person to scan is still choosing on screen. Nothing else is recorded until they finish.
             lock (_choiceLock)
             {
@@ -540,6 +550,10 @@ public class AttendanceEngine : BackgroundService
     {
         FingerCaptured?.Invoke();
         var evt = new TerminalEvent($"sim-{Guid.NewGuid():N}", terminalUserId, DateTime.UtcNow, "FINGERPRINT");
+        // Routed as a real finger is: consent, the sign-in screen, a login's own sign-in finger.
+        if (TryTakeConsentScan(evt)) return;
+        if (_staffSignInArmed) { StaffSignInScanned?.Invoke(terminalUserId); return; }
+        if (StaffRoles.IsLoginFinger(terminalUserId)) { LoginFingerAtKiosk?.Invoke(terminalUserId); return; }
         lock (_choiceLock)
         {
             if (_pendingChoice is not null) return;
@@ -729,6 +743,21 @@ public class AttendanceEngine : BackgroundService
             catch (FormatException)
             {
                 _logger.LogWarning("Skipped an unreadable fingerprint for employee {EmployeeId}.", first.EmployeeId);
+            }
+        }
+
+        // The sign-in fingers of this branch's Branch Manager / Back Office logins. A login that is deactivated, moved
+        // or deleted drops out of this list, and its finger is then removed from this PC like a departed employee's.
+        foreach (var staff in bundle.StaffTemplates ?? new List<StaffFingerprintItem>())
+        {
+            if (!StaffRoles.IsLoginFinger(staff.TerminalUserId)) continue;
+            try
+            {
+                fingerprints.Add(new ServerFingerprint(staff.TerminalUserId, 0, Convert.FromBase64String(staff.TemplateData)));
+            }
+            catch (FormatException)
+            {
+                _logger.LogWarning("Skipped an unreadable sign-in fingerprint for login {UserId}.", staff.UserId);
             }
         }
 

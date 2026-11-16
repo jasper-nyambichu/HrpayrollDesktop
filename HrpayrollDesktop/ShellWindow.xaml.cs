@@ -89,6 +89,7 @@ public partial class ShellWindow : Window
         engine.FingerCaptured += () => Dispatcher.InvokeAsync(OnFingerCaptured);
         engine.FingerNotRecognized += () => Dispatcher.InvokeAsync(OnNotRecognized);
         engine.StaffSignInScanned += userId => Dispatcher.InvokeAsync(() => Login.SignInWithFingerprint(userId));
+        engine.LoginFingerAtKiosk += userId => Dispatcher.InvokeAsync(() => OnLoginFingerAtKiosk(userId));
         engine.FingerRemoved += () => Dispatcher.InvokeAsync(() => Popups.NotifyFingerRemoved());
         engine.FingerPoorQuality += () => Dispatcher.InvokeAsync(() => Popups.ShowHint("Press a little firmer and keep your finger still."));
         engine.MatchOccurred += (userId, eventType, ts) => Dispatcher.InvokeAsync(() => OnClockedIn(userId, eventType, ts));
@@ -204,6 +205,10 @@ public partial class ShellWindow : Window
         _fit = fit;
         FitScale.ScaleX = fit;
         FitScale.ScaleY = fit;
+
+        // "Display" text is fitted to the screen's pixels: the sharpest on ordinary 100% monitors, where "Ideal"
+        // text looks soft. Scaled down to fit a small screen, Display text would be smudged, so Ideal is used then.
+        TextOptions.SetTextFormattingMode(this, fit >= 0.999 ? TextFormattingMode.Display : TextFormattingMode.Ideal);
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -446,6 +451,23 @@ public partial class ShellWindow : Window
         KioskOutcome(true, "Already recorded", $"{PopupHost.FirstName(name)}, there's no need to scan again.");
         Popups.ShowMessage(PopupKind.Info, "Already recorded",
             $"{name}, you {PastTense(lastEventType)} at {PopupHost.Clock(lastTimestampUtc)}. There's no need to scan again.");
+    }
+
+    // The Branch Manager's (or Back Office's) own sign-in finger, placed at the attendance screen: they are not an
+    // employee clocking in, so nothing is recorded; their sign-in opens and the finger signs them straight in.
+    private void OnLoginFingerAtKiosk(string terminalUserId)
+    {
+        if (Login.Visibility == Visibility.Visible)
+        {
+            Login.SignInWithFingerprint(terminalUserId);
+            return;
+        }
+        if (!KioskShowing) return;   // someone is already signed in on the console
+
+        Popups.CloseDialogs();
+        KioskOutcome(true, "Staff sign-in", "Checking your fingerprint…");
+        ShowLogin();
+        Login.SignInWithFingerprint(terminalUserId);
     }
 
     private void OnNotRecognized()

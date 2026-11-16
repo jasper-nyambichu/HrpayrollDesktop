@@ -422,6 +422,29 @@ public class SecuGenTerminalAdapter : ITerminalAdapter, IDisposable
         }
     }
 
+    public async Task<string?> FindOtherOwnerAsync(string terminalUserId)
+    {
+        await _deviceLock.WaitAsync();
+        try
+        {
+            byte[]? mine;
+            List<KeyValuePair<string, byte[]>> others;
+            lock (_templateSync)
+            {
+                mine = _templates.GetValueOrDefault(terminalUserId);
+                others = _templates.Where(kv => kv.Key != terminalUserId).ToList();
+            }
+            if (mine is null) return null;
+            foreach (var (id, template) in others)
+                if (Matches(mine, template, IdentifyLevel)) return id;
+            return null;
+        }
+        finally
+        {
+            _deviceLock.Release();
+        }
+    }
+
     public byte[]? GetTemplate(string terminalUserId)
     {
         lock (_templateSync) return _templates.GetValueOrDefault(terminalUserId);

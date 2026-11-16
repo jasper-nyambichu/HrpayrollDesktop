@@ -46,7 +46,14 @@ public record FingerprintSaveBody(long EmployeeId, string DeviceSerial, string T
 
 // Mirrors FingerprintSyncResponse.java. EmployeeIds is the branch's whole roster, enrolled or not.
 public record FingerprintSyncItem(long EmployeeId, string TerminalUserId, string? EmployeeName, string? EmployeeNumber, short FingerSlot, string TemplateData);
-public record FingerprintSyncBundle(List<FingerprintSyncItem> Templates, List<long> EmployeeIds);
+public record FingerprintSyncBundle(List<FingerprintSyncItem> Templates, List<long> EmployeeIds, List<StaffFingerprintItem>? StaffTemplates = null);
+
+// The sign-in finger of one of this branch's Branch Manager / Back Office logins ("staff-{userId}"); never attendance.
+public record StaffFingerprintItem(long UserId, string TerminalUserId, string? DisplayName, string? Role, string TemplateData);
+
+// Body of POST /attendance/enrollment/my-fingerprint, and what GET answers.
+public record LoginFingerprintBody(string DeviceSerial, string TemplateData, int? QualityScore);
+public record LoginFingerprintStatus(bool Registered);
 
 // Body and result of POST /attendance/devices (DeviceRegistrationRequest / DeviceRegistrationResponse).
 public record DeviceRegistrationBody(long BranchId, string DeviceSerial);

@@ -33,6 +33,12 @@ public interface ITerminalAdapter
     Task<bool> EnrollAsync(string terminalUserId, CancellationToken cancellationToken);
     Task RemoveEnrollmentAsync(string terminalUserId);
 
+    /// <summary>
+    /// Another person this PC holds whose finger matches the stored finger of <paramref name="terminalUserId"/>, or
+    /// null. So one finger is never both an employee's (attendance) and a login's (sign-in).
+    /// </summary>
+    Task<string?> FindOtherOwnerAsync(string terminalUserId);
+
     /// <summary>The stored template of one person, or null if this PC has none.</summary>
     byte[]? GetTemplate(string terminalUserId);
 

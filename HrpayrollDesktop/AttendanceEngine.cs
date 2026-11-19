@@ -27,6 +27,19 @@ public class AttendanceEngine : BackgroundService
     // instead of accidentally flipping CLOCK_IN to CLOCK_OUT.
     private static readonly TimeSpan ScanCooldown = TimeSpan.FromSeconds(30);
 
+    // Someone out on lunch or a temporary check-out may come straight back (forgot something, errand
+    // cancelled): their return is read after this short pause instead of the 30 seconds.
+    private static readonly TimeSpan ReturnCooldown = TimeSpan.FromSeconds(5);
+
+    /// <summary>The same finger again too soon after the last step: "already recorded", nothing new.</summary>
+    private static bool IsRepeatScan(TerminalEvent evt, AttendanceLogEntry? last)
+    {
+        if (last is null) return false;
+        var since = evt.Timestamp - last.TimestampUtc;
+        var onBreak = last.EventType is "LUNCH_OUT" or "EMERGENCY_OUT";
+        return since < (onBreak ? ReturnCooldown : ScanCooldown);
+    }
+
     // Time allowed for lunch. The server applies the same limit when it records who came back late.
     public static readonly TimeSpan LunchAllowance = TimeSpan.FromMinutes(30);
 
@@ -420,9 +433,9 @@ public class AttendanceEngine : BackgroundService
             var last = _localStore.GetLastEventToday(evt.TerminalUserId);
 
             // Every touch gets exactly one visible outcome: success, already-recorded, or not-recognized.
-            if (last is not null && (evt.Timestamp - last.TimestampUtc) < ScanCooldown)
+            if (IsRepeatScan(evt, last))
             {
-                DuplicateScan?.Invoke(evt.TerminalUserId, last.EventType, last.TimestampUtc);
+                DuplicateScan?.Invoke(evt.TerminalUserId, last!.EventType, last.TimestampUtc);
                 continue;
             }
 
@@ -552,9 +565,9 @@ public class AttendanceEngine : BackgroundService
         }
         await RefreshBranchDayIfStaleAsync(CancellationToken.None);   // exactly as a real finger does
         var last = _localStore.GetLastEventToday(terminalUserId);
-        if (last is not null && (evt.Timestamp - last.TimestampUtc) < ScanCooldown)
+        if (IsRepeatScan(evt, last))
         {
-            DuplicateScan?.Invoke(terminalUserId, last.EventType, last.TimestampUtc);
+            DuplicateScan?.Invoke(terminalUserId, last!.EventType, last.TimestampUtc);
             return;
         }
         HandleScan(evt, last);

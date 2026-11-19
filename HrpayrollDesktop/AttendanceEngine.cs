@@ -60,7 +60,6 @@ public class AttendanceEngine : BackgroundService
     public event Action<string, string, DateTime>? DuplicateScan;   // terminalUserId, lastEventType, lastTimestampUtc
     public event Action<ScanChoiceRequest>? ChoiceRequired;         // someone at work scanned: lunch, temporary check-out or clock out?
     public event Action<BreakReturn>? ReturnedFromBreak;             // someone out on a break scanned back in
-    public event Action<string, DateTime, DateTime>? LunchNotOver;   // terminalUserId, lunch started (UTC), lunch ends (UTC): nothing recorded
     public event Action? FingerCaptured;
     public event Action? FingerNotRecognized;
     public event Action? FingerRemoved;
@@ -448,19 +447,12 @@ public class AttendanceEngine : BackgroundService
                 break;
 
             case "LUNCH_OUT":
-            {
-                // Lunch is a full 30 minutes: scanning before it is over records nothing, it only says when it ends.
-                var lunchEnds = last.ExpectedBackUtc ?? last.TimestampUtc + LunchAllowance;
-                if (evt.Timestamp.ToUniversalTime() < lunchEnds.ToUniversalTime())
-                {
-                    LunchNotOver?.Invoke(evt.TerminalUserId, last.TimestampUtc, lunchEnds);
-                    break;
-                }
+                // Back from lunch at any time: coming back early is fine. Only a return after the 30 minutes is
+                // late, and the server records by how much (shown on the Admin dashboard).
                 Record(evt, "BREAK_RETURN");
                 ReturnedFromBreak?.Invoke(new BreakReturn(evt.TerminalUserId, WasLunch: true,
-                    last.TimestampUtc, evt.Timestamp, last.ExpectedBackUtc));
+                    last.TimestampUtc, evt.Timestamp, last.ExpectedBackUtc ?? last.TimestampUtc + LunchAllowance));
                 break;
-            }
 
             case "EMERGENCY_OUT":
                 Record(evt, "BREAK_RETURN");

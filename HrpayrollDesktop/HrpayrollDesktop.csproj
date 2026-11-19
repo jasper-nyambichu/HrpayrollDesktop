@@ -15,7 +15,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
 
     <!-- Shown in Windows' installed apps list. Raise Version for every installer you hand out. -->
-    <Version>1.4.6</Version>
+    <Version>1.4.7</Version>
     <Company>DhwarshHub</Company>
     <Product>Dhwarsh Employee Management</Product>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>

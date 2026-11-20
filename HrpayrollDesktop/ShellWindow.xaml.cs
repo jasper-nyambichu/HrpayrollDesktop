@@ -157,6 +157,9 @@ public partial class ShellWindow : Window
             RefreshSync();
         };
 
+        // Which version this PC runs, in the title strip, so it can be checked at a glance (e.g. after an update).
+        AppVersionText.Text = $"· v{Config.UpdateChecker.Current}";
+
         // New versions: asked about shortly after the app opens, then every few hours.
         _updateTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(20) };
         _updateTimer.Tick += async (_, _) => await OfferUpdateAsync();

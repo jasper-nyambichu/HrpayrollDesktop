@@ -36,6 +36,7 @@
             <StackPanel Orientation="Horizontal" Margin="22,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
                 <Image Source="/Assets/dhwarsh-mark.png" Width="20" Height="20" RenderOptions.BitmapScalingMode="HighQuality"/>
                 <TextBlock Text="Dhwarsh Employee Management" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource NavyBrush}" Margin="7,0,0,0" VerticalAlignment="Center"/>
+                <TextBlock x:Name="AppVersionText" FontSize="11" Foreground="{StaticResource InkSoftBrush}" Margin="6,0,0,0" VerticalAlignment="Center"/>
             </StackPanel>
 
             <!-- The white panel from the design, floating on the light background -->

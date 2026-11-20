@@ -7,6 +7,8 @@ using System;
 using System.ComponentModel;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -155,12 +157,81 @@ public partial class ShellWindow : Window
             RefreshSync();
         };
 
+        // New versions: asked about shortly after the app opens, then every few hours.
+        _updateTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(20) };
+        _updateTimer.Tick += async (_, _) => await OfferUpdateAsync();
+        _updateTimer.Start();
+
 #if DEBUG
         StartScanSimulator();
 #endif
     }
 
     private void Touch() => _lastActivityUtc = DateTime.UtcNow;
+
+    // ===== Updates =====
+
+    private DispatcherTimer _updateTimer = null!;
+    private bool _offeringUpdate;
+    private static readonly TimeSpan UpdateCheckEvery = TimeSpan.FromHours(3);
+    private static readonly TimeSpan UpdateLater = TimeSpan.FromHours(4);
+
+    // A newer version has been published: ask the person at the PC whether to install it now. Only on the attendance
+    // screen with nothing else open, so it never interrupts a scan or someone signed in. "Later" asks again in a few
+    // hours; an unattended PC still installs it by itself overnight.
+    private async Task OfferUpdateAsync()
+    {
+        if (_offeringUpdate) return;
+        _offeringUpdate = true;
+        _updateTimer.Stop();
+        var next = UpdateCheckEvery;
+        try
+        {
+            var update = await Config.UpdateChecker.CheckAsync(CancellationToken.None);
+            if (update is null) return;
+
+            if (!KioskShowing || Popups.IsChoosing || ManagerConsole.Visibility == Visibility.Visible || ManualCheckIn.Visibility == Visibility.Visible)
+            {
+                next = TimeSpan.FromMinutes(5);   // busy: ask again shortly
+                return;
+            }
+
+            var notes = string.IsNullOrWhiteSpace(update.Notes) ? "" : $"\n\nWhat's new:\n{Shorten(update.Notes, 600)}";
+            var yes = await Popups.ConfirmAsync(
+                $"Update available: version {update.Version}",
+                $"You have version {Config.UpdateChecker.Current}. Updating takes about a minute: the app closes, installs the new version and opens again by itself. Scans saved on this computer are kept.{notes}",
+                "Update now");
+            if (!yes)
+            {
+                next = UpdateLater;
+                return;
+            }
+
+            if (Config.UpdateChecker.RequestUpdateNow())
+            {
+                Popups.ShowMessage(PopupKind.Info, "Updating…",
+                    $"Installing version {update.Version}. The app closes now and opens again by itself in about a minute.",
+                    autoCloseSeconds: 4);
+                await Task.Delay(TimeSpan.FromSeconds(4));
+                Application.Current.Shutdown();
+            }
+            else
+            {
+                Popups.ShowMessage(PopupKind.Info, "The update is on its way",
+                    $"Version {update.Version} installs by itself within the hour, while nobody is using the app, and then opens again.",
+                    autoCloseSeconds: 8);
+                next = UpdateLater;
+            }
+        }
+        finally
+        {
+            _offeringUpdate = false;
+            _updateTimer.Interval = next;
+            _updateTimer.Start();
+        }
+    }
+
+    private static string Shorten(string text, int max) => text.Length <= max ? text : text[..max].TrimEnd() + "…";
 
     // ===== Window controls =====
 

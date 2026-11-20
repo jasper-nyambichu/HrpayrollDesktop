@@ -32,6 +32,16 @@ if (-not $skipUpdater) {
         -Description 'Installs new versions of Dhwarsh Employee Management, signed with the release key.' | Out-Null
 }
 
+# "Update now" in the app starts the updater, so anyone signed in to Windows may run it (read + execute). Only
+# SYSTEM and administrators may change it, so nobody can make it run anything else.
+try {
+    $service = New-Object -ComObject 'Schedule.Service'
+    $service.Connect()
+    $service.GetFolder('\Dhwarsh HR').GetTask('Updater').SetSecurityDescriptor('D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;AU)', 0)
+} catch {
+    Write-Warning "Could not let users start the updater: $($_.Exception.Message). Updates still install overnight."
+}
+
 # BUILTIN\Users: runs on the desktop of whoever is signed in to Windows.
 $openAction = New-ScheduledTaskAction -Execute (Join-Path $AppDir 'HrpayrollDesktop.exe') -WorkingDirectory $AppDir
 Register-ScheduledTask -TaskPath $path -TaskName 'Open app' -Force -Action $openAction `

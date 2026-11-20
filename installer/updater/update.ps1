@@ -3,11 +3,13 @@
 # Windows runs this every hour as SYSTEM (the "Dhwarsh HR\Updater" scheduled task the installer creates), so an
 # update needs nobody to approve an administrator prompt at the branch. It:
 #   1. asks GitHub for the newest release of the desktop app;
-#   2. stops if this PC already has it, or while someone is signed in to the app (it tries again next hour);
+#   2. stops if this PC already has it. Otherwise it installs when the person at the PC pressed "Update now" in
+#      the app (the app leaves update-requested and starts this task), or by itself overnight (22:00-05:00) while
+#      nobody is using the app, so an unattended branch PC still gets it;
 #   3. downloads the setup .exe and its signature into the app folder, which only administrators can change;
 #   4. installs it only if the signature was made with the release key, so nobody who gets into the GitHub
 #      account, or between the PC and GitHub, can push their own program onto the branch PCs;
-#   5. installs silently, then opens the app again if it was open.
+#   5. installs silently, then opens the app again (always after "Update now"). No Windows restart is needed.
 # What it did goes to C:\ProgramData\Dhwarsh HR\update.log.
 
 # The parameters are for testing only; the scheduled task passes none.
@@ -34,6 +36,19 @@ function Test-AppBusy {
     return (Test-Path $flag) -and (((Get-Date) - (Get-Item $flag).LastWriteTime).TotalMinutes -lt 10)
 }
 
+# "Update now" pressed in the app within the last two hours.
+$RequestFile = Join-Path $DataDir 'update-requested'
+function Test-Requested {
+    return (Test-Path $RequestFile) -and (((Get-Date) - (Get-Item $RequestFile).LastWriteTime).TotalHours -lt 2)
+}
+function Clear-Request { Remove-Item $RequestFile -Force -ErrorAction SilentlyContinue }
+
+# Without a request, it installs by itself only at night, when the branch is closed.
+function Test-NightWindow {
+    $hour = (Get-Date).Hour
+    return $hour -ge 22 -or $hour -lt 5
+}
+
 $mutex = New-Object System.Threading.Mutex($false, 'Global\DhwarshHR.Updater')
 if (-not $mutex.WaitOne(0)) { exit 0 }
 
@@ -56,9 +71,13 @@ try {
     if (-not [version]::TryParse($tag, [ref]$latest)) { Write-Log "Release tag '$($release.tag_name)' is not a version; ignored."; exit 0 }
     if ($latest.Build -lt 0) { $latest = New-Object Version($latest.Major, $latest.Minor, 0) }
     $installedShort = New-Object Version($installed.Major, $installed.Minor, [Math]::Max(0, $installed.Build))
-    if ($latest -le $installedShort) { exit 0 }
+    $requested = Test-Requested
+    if ($latest -le $installedShort) { if ($requested) { Clear-Request }; exit 0 }
 
-    if (Test-AppBusy) { Write-Log "Version $tag is ready but someone is signed in. Trying again within the hour."; exit 0 }
+    if (-not $requested) {
+        if (-not (Test-NightWindow)) { exit 0 }   # during the day the app asks first
+        if (Test-AppBusy) { Write-Log "Version $tag is ready but someone is signed in. Trying again within the hour."; exit 0 }
+    }
 
     $setupName = "DhwarshHR-Setup-$tag.exe"
     $asset = $release.assets | Where-Object { $_.name -eq $setupName } | Select-Object -First 1
@@ -87,8 +106,8 @@ try {
         exit 1
     }
 
-    # Someone may have signed in while it downloaded.
-    if (Test-AppBusy) { Write-Log "Version $tag downloaded, but someone signed in. Installing at the next check."; exit 0 }
+    # Someone may have signed in while it downloaded (not after "Update now": the app has closed itself).
+    if (-not $requested -and (Test-AppBusy)) { Write-Log "Version $tag downloaded, but someone signed in. Installing at the next check."; exit 0 }
 
     $wasRunning = [bool](Get-Process -Name 'HrpayrollDesktop' -ErrorAction SilentlyContinue)
     $installLog = Join-Path $DataDir 'update-install.log'
@@ -100,7 +119,9 @@ try {
         Write-Log "Installed $tag."
     }
 
-    if ($wasRunning -and -not (Get-Process -Name 'HrpayrollDesktop' -ErrorAction SilentlyContinue)) {
+    if ($requested) { Write-Log "Installed because Update now was pressed in the app." }
+    Clear-Request
+    if (($wasRunning -or $requested) -and -not (Get-Process -Name 'HrpayrollDesktop' -ErrorAction SilentlyContinue)) {
         try { Start-ScheduledTask -TaskPath '\Dhwarsh HR\' -TaskName 'Open app' } catch { Write-Log "Could not reopen the app: $($_.Exception.Message)" }
     }
     Remove-Item $setup, $sigFile -Force -ErrorAction SilentlyContinue

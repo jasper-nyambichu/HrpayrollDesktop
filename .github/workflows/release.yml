@@ -1,0 +1,102 @@
+# Publishes every new version of the desktop app, so nobody builds or carries installers to the branch PCs.
+#
+# On each push to main: if <Version> in HrpayrollDesktop.csproj has no release yet, GitHub builds the installers
+# (installer\build-installer.ps1), signs them with the release key and publishes release v<Version> with:
+#   DhwarshHR-Setup-<v>.exe (+ .sig)   what every installed PC updates itself from
+#   Kisiimatt-Setup-<v>.exe, ShahCeramics-Setup-<v>.exe   for setting up a new PC
+# The installed apps then offer the update ("Update now"), or install it by themselves overnight.
+#
+# Needs one repository secret, UPDATE_SIGNING_KEY: the contents of %USERPROFILE%\.dhwarsh\update-signing-key.xml
+# from the PC that made the key (Settings -> Secrets and variables -> Actions -> New repository secret).
+# To release: raise <Version> in the .csproj, commit and push. The commit message becomes "What's new".
+name: Release desktop app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'HrpayrollDesktop/**'
+      - 'installer/**'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Which version, and is it released yet
+        id: version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [xml]$project = Get-Content HrpayrollDesktop/HrpayrollDesktop.csproj
+          $version = ($project.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1).Version
+          "version=$version" >> $env:GITHUB_OUTPUT
+          gh release view "v$version" --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            "publish=false" >> $env:GITHUB_OUTPUT
+            Write-Host "v$version is already released. Raise <Version> in HrpayrollDesktop.csproj to publish a new one."
+          } else {
+            "publish=true" >> $env:GITHUB_OUTPUT
+            Write-Host "Publishing v$version."
+          }
+          exit 0
+
+      - name: .NET SDK
+        if: steps.version.outputs.publish == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Inno Setup
+        if: steps.version.outputs.publish == 'true'
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Release key
+        if: steps.version.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if (-not $env:UPDATE_SIGNING_KEY) { throw 'The UPDATE_SIGNING_KEY secret is missing: installed PCs only accept signed updates.' }
+          $folder = Join-Path $env:USERPROFILE '.dhwarsh'
+          New-Item -ItemType Directory -Force $folder | Out-Null
+          Set-Content -Path (Join-Path $folder 'update-signing-key.xml') -Value $env:UPDATE_SIGNING_KEY -NoNewline
+
+      - name: Build and sign the installers
+        if: steps.version.outputs.publish == 'true'
+        shell: pwsh
+        run: ./installer/build-installer.ps1
+
+      - name: Publish the release
+        if: steps.version.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          $out = 'installer/Output'
+          $notes = ((git log -1 --pretty=%B) | Where-Object { $_ -notmatch '^Co-Authored-By' }) -join "`n"
+          $notes = $notes.Trim()
+          if (-not $notes) { $notes = 'Bug fixes and improvements.' }
+          gh release create "v$v" `
+            "$out/DhwarshHR-Setup-$v.exe" "$out/DhwarshHR-Setup-$v.exe.sig" `
+            "$out/Kisiimatt-Setup-$v.exe" "$out/ShahCeramics-Setup-$v.exe" `
+            --repo $env:GITHUB_REPOSITORY --title "Dhwarsh Employee Management $v" --notes $notes --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Publishing the release failed.' }
+
+      - name: Remove the key from the build machine
+        if: always()
+        shell: pwsh
+        run: Remove-Item (Join-Path $env:USERPROFILE '.dhwarsh') -Recurse -Force -ErrorAction SilentlyContinue
